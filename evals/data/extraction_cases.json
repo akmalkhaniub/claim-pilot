@@ -1,0 +1,40 @@
+[
+  {
+    "id": "case_001",
+    "name": "Auto Accident - Standard",
+    "transcript": [
+      {"role": "user", "content": "I need to file a car insurance claim. My policy is POL9982."},
+      {"role": "assistant", "content": "Sure, I can help with that. What happened and when did it occur?"},
+      {"role": "user", "content": "It happened yesterday, June 13th, 2026. A delivery van backed into my parked car. The damage is pretty bad on the bumper. Probably around $1,500 to fix."},
+      {"role": "assistant", "content": "Were there any other parties involved?"},
+      {"role": "user", "content": "Yes, the delivery driver. His name is Dave Miller. No other cars were involved."}
+    ],
+    "expected_fields": {
+      "claim_type": "Auto",
+      "policy_number": "POL9982",
+      "incident_date": "2026-06-13",
+      "loss_amount": 1500,
+      "parties_involved": ["Dave Miller"]
+    },
+    "expected_risk": "low"
+  },
+  {
+    "id": "case_002",
+    "name": "Water Damage - High Risk",
+    "transcript": [
+      {"role": "user", "content": "Our basement flooded. The pipe burst. Policy number is POL4004."},
+      {"role": "assistant", "content": "Oh, that's stressful. What date did the leak start, and how bad is the damage?"},
+      {"role": "user", "content": "It happened on June 10th. The whole floor is ruined, including our home theater and computer setup. I'd say the loss is easily $35,000. It's just me and my husband here."},
+      {"role": "assistant", "content": "I'm sorry to hear that. Was there anyone else involved, or was it just natural wear?"},
+      {"role": "user", "content": "Just a burst copper pipe. Plumber says it froze. No one else was involved."}
+    ],
+    "expected_fields": {
+      "claim_type": "Property",
+      "policy_number": "POL4004",
+      "incident_date": "2026-06-10",
+      "loss_amount": 35000,
+      "parties_involved": []
+    },
+    "expected_risk": "high"
+  }
+]
