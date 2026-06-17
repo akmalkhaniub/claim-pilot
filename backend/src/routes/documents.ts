@@ -5,7 +5,7 @@ import { AuthenticatedRequest } from '../middleware/auth.js';
 import { query } from '../config/db.js';
 
 const router = Router({ mergeParams: true });
-const PARSER_SERVICE_URL = process.env.PARSER_SERVICE_URL || 'http://localhost:8000';
+const PARSER_SERVICE_URL = process.env.PARSER_SERVICE_URL || 'http://127.0.0.1:8000';
 
 // Ensure upload directory exists
 const UPLOADS_DIR = path.resolve('uploads');

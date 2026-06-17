@@ -45,6 +45,12 @@ export default function ClaimantDashboard() {
   const [newClaimType, setNewClaimType] = useState('Auto');
   const [showCreateModal, setShowCreateModal] = useState(false);
   
+  // RAG Search states
+  const [rightPanelTab, setRightPanelTab] = useState<'chat' | 'search'>('chat');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -73,6 +79,10 @@ export default function ClaimantDashboard() {
   useEffect(() => {
     if (activeClaimId && token) {
       fetchClaimDetails(activeClaimId);
+      // Reset search states on claim switch
+      setSearchQuery('');
+      setSearchResults([]);
+      setRightPanelTab('chat');
     }
   }, [activeClaimId, token]);
 
@@ -313,6 +323,30 @@ export default function ClaimantDashboard() {
     }
   };
 
+  const handleRAGSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim() || !activeClaimId) return;
+
+    setSearchLoading(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/${activeClaimId}/search?q=${encodeURIComponent(searchQuery)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSearchResults(data.results || []);
+      } else {
+        console.error('RAG Search failed');
+        setSearchResults([]);
+      }
+    } catch (err) {
+      console.error('Error during RAG Search:', err);
+      setSearchResults([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
   const logout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -458,54 +492,134 @@ export default function ClaimantDashboard() {
         {/* Right Side: Interactive AI Chat Console */}
         <section className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
           {activeClaimId ? (
-            <div className="chat-container">
-              {/* Chat Header */}
-              <div style={{ padding: '1.25rem', borderBottom: '1px solid var(--border-card)', background: 'rgba(255,255,255,0.01)' }}>
-                <h3 style={{ fontSize: '1.1rem' }}>AI Claim Intake Copilot</h3>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  Answer the agent's questions conversationally to automatically fill your claim report.
-                </p>
-              </div>
-
-              {/* Messages Pane */}
-              <div className="chat-messages">
-                {messages.length === 0 && (
-                  <div className="chat-bubble chat-bubble-assistant">
-                    Hello! I'm your ClaimPilot AI assistant. I'm here to file your insurance claim.
-                    To start, could you please provide your policy number and tell me what type of claim this is (Auto, Property, Health, or General Liability)?
-                  </div>
-                )}
-                {messages.map((msg, i) => (
-                  <div key={i} className={`chat-bubble chat-bubble-${msg.role}`}>
-                    {msg.content}
-                  </div>
-                ))}
-                {chatLoading && messages[messages.length - 1]?.role === 'user' && (
-                  <div className="chat-bubble chat-bubble-assistant pulse-active">
-                    AI is writing response...
-                  </div>
-                )}
-                <div ref={chatEndRef} />
-              </div>
-
-              {/* Input Box */}
-              <form onSubmit={handleSendMessage} className="chat-input-area">
-                <input
-                  type="text"
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  placeholder="Type details of your incident here..."
-                  disabled={chatLoading || activeClaim?.status !== 'draft'}
-                  className="chat-input"
-                />
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              {/* Tab Header */}
+              <div className="search-tab-header" style={{ padding: '0.5rem 1rem 0 1rem', display: 'flex', gap: '0.5rem' }}>
                 <button
-                  type="submit"
-                  disabled={chatLoading || activeClaim?.status !== 'draft' || !inputText.trim()}
-                  className="btn btn-primary"
+                  onClick={() => setRightPanelTab('chat')}
+                  className={`search-tab-btn ${rightPanelTab === 'chat' ? 'active' : ''}`}
                 >
-                  Send
+                  AI Chat Assistant
                 </button>
-              </form>
+                <button
+                  onClick={() => setRightPanelTab('search')}
+                  className={`search-tab-btn ${rightPanelTab === 'search' ? 'active' : ''}`}
+                >
+                  RAG Policy & Document Search
+                </button>
+              </div>
+
+              {rightPanelTab === 'chat' ? (
+                <div className="chat-container" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: 'auto' }}>
+                  {/* Chat Header */}
+                  <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-card)', background: 'rgba(255,255,255,0.01)' }}>
+                    <h3 style={{ fontSize: '1.1rem' }}>AI Claim Intake Copilot</h3>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      Answer the agent's questions conversationally to automatically fill your claim report.
+                    </p>
+                  </div>
+
+                  {/* Messages Pane */}
+                  <div className="chat-messages" style={{ flex: 1 }}>
+                    {messages.length === 0 && (
+                      <div className="chat-bubble chat-bubble-assistant">
+                        Hello! I'm your ClaimPilot AI assistant. I'm here to file your insurance claim.
+                        To start, could you please provide your policy number and tell me what type of claim this is (Auto, Property, Health, or General Liability)?
+                      </div>
+                    )}
+                    {messages.map((msg, i) => (
+                      <div key={i} className={`chat-bubble chat-bubble-${msg.role}`}>
+                        {msg.content}
+                      </div>
+                    ))}
+                    {chatLoading && messages[messages.length - 1]?.role === 'user' && (
+                      <div className="chat-bubble chat-bubble-assistant pulse-active">
+                        AI is writing response...
+                      </div>
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  {/* Input Box */}
+                  <form onSubmit={handleSendMessage} className="chat-input-area">
+                    <input
+                      type="text"
+                      value={inputText}
+                      onChange={(e) => setInputText(e.target.value)}
+                      placeholder="Type details of your incident here..."
+                      disabled={chatLoading || activeClaim?.status !== 'draft'}
+                      className="chat-input"
+                    />
+                    <button
+                      type="submit"
+                      disabled={chatLoading || activeClaim?.status !== 'draft' || !inputText.trim()}
+                      className="btn btn-primary"
+                    >
+                      Send
+                    </button>
+                  </form>
+                </div>
+              ) : (
+                <div className="rag-container" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1.25rem', overflow: 'hidden' }}>
+                  <div>
+                    <h3 style={{ fontSize: '1.1rem', marginBottom: '0.25rem' }}>Document Vector Explorer (RAG)</h3>
+                    <p className="rag-header-desc">
+                      Ask questions directly to search indexed text chunks of your uploaded policy, estimates, or receipts.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleRAGSearch} className="search-bar-group" style={{ marginBottom: '1rem' }}>
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="e.g. Is water damage covered? What is the deductible?"
+                      className="search-input"
+                    />
+                    <button type="submit" disabled={searchLoading} className="search-btn">
+                      {searchLoading ? 'Searching...' : 'Search'}
+                    </button>
+                  </form>
+
+                  <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.25rem' }}>
+                    {searchResults.length === 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)', minHeight: '200px' }}>
+                        <span style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🔍</span>
+                        <p style={{ fontSize: '0.85rem', fontStyle: 'italic', textAlign: 'center' }}>
+                          No results yet. Type a query above to retrieve relevant document chunks using vector embedding matching.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="search-results-list">
+                        {searchResults.map((res, idx) => {
+                          const simPct = Math.round(res.similarity * 100);
+                          let badgeClass = 'badge-low';
+                          if (simPct >= 75) badgeClass = 'badge-high';
+                          else if (simPct >= 50) badgeClass = 'badge-mid';
+
+                          return (
+                            <div key={idx} className="search-result-card">
+                              <div className="search-result-header">
+                                <div className="search-result-title">
+                                  <span>📄</span> {res.documentName}
+                                </div>
+                                <span className={`search-result-badge ${badgeClass}`}>
+                                  {simPct}% Match
+                                </span>
+                              </div>
+                              <p className="search-result-content">{res.content}</p>
+                              <div className="search-result-meta">
+                                <span>Chunk Index: {res.chunkIndex + 1}</span>
+                                <span>pgvector similarity</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)', padding: '3rem' }}>

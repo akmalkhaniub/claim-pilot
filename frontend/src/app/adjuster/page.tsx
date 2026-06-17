@@ -59,6 +59,19 @@ export default function AdjusterDashboard() {
   const [submittingDecision, setSubmittingDecision] = useState(false);
   const [loadingClaims, setLoadingClaims] = useState(true);
 
+  // Split B Tab state
+  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search'>('transcript');
+  
+  // Claim-specific search states
+  const [claimSearchQuery, setClaimSearchQuery] = useState('');
+  const [claimSearchResults, setClaimSearchResults] = useState<any[]>([]);
+  const [claimSearchLoading, setClaimSearchLoading] = useState(false);
+
+  // Global search states (for landing dashboard)
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [globalSearchResults, setGlobalSearchResults] = useState<any[]>([]);
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
+
   // Authenticate user on mount
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -90,6 +103,10 @@ export default function AdjusterDashboard() {
   useEffect(() => {
     if (selectedClaimId && token) {
       fetchClaimDetails(selectedClaimId);
+      // Reset claim search states on claim switch
+      setClaimSearchQuery('');
+      setClaimSearchResults([]);
+      setSplitBTab('transcript');
     }
   }, [selectedClaimId, token]);
 
@@ -181,6 +198,54 @@ export default function AdjusterDashboard() {
     if (score >= 0.7) return 'var(--state-rejected)';
     if (score >= 0.4) return 'var(--state-review)';
     return 'var(--state-approved)';
+  };
+
+  const handleClaimSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!claimSearchQuery.trim() || !selectedClaimId) return;
+
+    setClaimSearchLoading(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/search?q=${encodeURIComponent(claimSearchQuery)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setClaimSearchResults(data.results || []);
+      } else {
+        console.error('Claim RAG Search failed');
+        setClaimSearchResults([]);
+      }
+    } catch (err) {
+      console.error('Error during claim search:', err);
+      setClaimSearchResults([]);
+    } finally {
+      setClaimSearchLoading(false);
+    }
+  };
+
+  const handleGlobalSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!globalSearchQuery.trim()) return;
+
+    setGlobalSearchLoading(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/search?q=${encodeURIComponent(globalSearchQuery)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGlobalSearchResults(data.results || []);
+      } else {
+        console.error('Global RAG Search failed');
+        setGlobalSearchResults([]);
+      }
+    } catch (err) {
+      console.error('Error during global search:', err);
+      setGlobalSearchResults([]);
+    } finally {
+      setGlobalSearchLoading(false);
+    }
   };
 
   const logout = () => {
@@ -397,31 +462,101 @@ export default function AdjusterDashboard() {
               </div>
             </div>
 
-            {/* Split B: Transcript & Human Triage Decision */}
-            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: 0, overflow: 'hidden', maxHeight: 'calc(100vh - 160px)' }}>
+            {/* Split B: Transcript, Claim Documents RAG Search & Human Triage Decision */}
+            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden', maxHeight: 'calc(100vh - 160px)' }}>
               
-              {/* Chat Log Header */}
-              <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-card)', background: 'rgba(255,255,255,0.01)' }}>
-                <h4 style={{ fontSize: '0.95rem' }}>Intake Conversation Transcript</h4>
+              {/* Tab Header */}
+              <div className="search-tab-header" style={{ padding: '0.5rem 1rem 0 1rem', display: 'flex', gap: '0.5rem' }}>
+                <button
+                  onClick={() => setSplitBTab('transcript')}
+                  className={`search-tab-btn ${splitBTab === 'transcript' ? 'active' : ''}`}
+                >
+                  Intake Transcript
+                </button>
+                <button
+                  onClick={() => setSplitBTab('search')}
+                  className={`search-tab-btn ${splitBTab === 'search' ? 'active' : ''}`}
+                >
+                  Document RAG Search
+                </button>
               </div>
 
-              {/* Messages viewport */}
-              <div className="chat-messages" style={{ padding: '1rem', flex: 1 }}>
-                {messages.length === 0 ? (
-                  <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.85rem', textAlign: 'center', marginTop: '2rem' }}>
-                    No messages recorded.
-                  </div>
-                ) : (
-                  messages.map((msg, i) => (
-                    <div key={i} className={`chat-bubble chat-bubble-${msg.role}`} style={{ fontSize: '0.85rem', padding: '0.75rem' }}>
-                      <strong>{msg.role === 'user' ? 'Claimant' : 'Intake AI'}:</strong>
-                      <div style={{ marginTop: '0.25rem' }}>{msg.content}</div>
+              {/* Tab Content */}
+              {splitBTab === 'transcript' ? (
+                <div className="chat-messages" style={{ padding: '1rem', flex: 1 }}>
+                  {messages.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.85rem', textAlign: 'center', marginTop: '2rem' }}>
+                      No messages recorded.
                     </div>
-                  ))
-                )}
-              </div>
+                  ) : (
+                    messages.map((msg, i) => (
+                      <div key={i} className={`chat-bubble chat-bubble-${msg.role}`} style={{ fontSize: '0.85rem', padding: '0.75rem' }}>
+                        <strong>{msg.role === 'user' ? 'Claimant' : 'Intake AI'}:</strong>
+                        <div style={{ marginTop: '0.25rem' }}>{msg.content}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : (
+                <div className="rag-container" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
+                  <div>
+                    <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>Claim Document Search</h4>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      Search within this claim's attached documents using vector similarity.
+                    </p>
+                  </div>
 
-              {/* Triage Decision Pad */}
+                  <form onSubmit={handleClaimSearch} className="search-bar-group" style={{ marginBottom: '1rem' }}>
+                    <input
+                      type="text"
+                      value={claimSearchQuery}
+                      onChange={(e) => setClaimSearchQuery(e.target.value)}
+                      placeholder="e.g. Is water damage covered? What is the deductible?"
+                      className="search-input"
+                    />
+                    <button type="submit" disabled={claimSearchLoading} className="search-btn">
+                      {claimSearchLoading ? 'Searching...' : 'Search'}
+                    </button>
+                  </form>
+
+                  <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.25rem' }}>
+                    {claimSearchResults.length === 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)', minHeight: '150px' }}>
+                        <span style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔍</span>
+                        <p style={{ fontSize: '0.8rem', fontStyle: 'italic', textAlign: 'center' }}>
+                          No matches found. Enter a search query to scan document chunks.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="search-results-list" style={{ gap: '0.75rem' }}>
+                        {claimSearchResults.map((res, idx) => {
+                          const simPct = Math.round(res.similarity * 100);
+                          let badgeClass = 'badge-low';
+                          if (simPct >= 75) badgeClass = 'badge-high';
+                          else if (simPct >= 50) badgeClass = 'badge-mid';
+
+                          return (
+                            <div key={idx} className="search-result-card" style={{ padding: '1rem' }}>
+                              <div className="search-result-header" style={{ marginBottom: '0.5rem' }}>
+                                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>📄 {res.documentName}</span>
+                                <span className={`search-result-badge ${badgeClass}`} style={{ fontSize: '0.7rem' }}>
+                                  {simPct}% Match
+                                </span>
+                              </div>
+                              <p className="search-result-content" style={{ fontSize: '0.8rem', padding: '0.5rem' }}>{res.content}</p>
+                              <div className="search-result-meta" style={{ marginTop: '0.5rem', fontSize: '0.7rem' }}>
+                                <span>Chunk {res.chunkIndex + 1}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Triage Decision Pad (Always Visible) */}
               <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--border-card)', background: 'rgba(255,255,255,0.01)' }}>
                 <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Human Adjuster Triage Decision</h4>
                 
@@ -495,9 +630,85 @@ export default function AdjusterDashboard() {
 
           </section>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '300px', color: 'var(--text-muted)', padding: '3rem' }}>
-            <span style={{ fontSize: '3.5rem' }}>\uD83D\uDCCB</span>
-            <p style={{ marginTop: '1rem', fontStyle: 'italic' }}>Select a claim from the queue to start risk analysis and review.</p>
+          <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', padding: '2rem', minHeight: '400px' }}>
+            <div>
+              <h2 style={{ fontSize: '1.5rem', marginBottom: '0.25rem', color: 'var(--accent-cyan)' }}>
+                Global Policy & Precedent RAG Search
+              </h2>
+              <p className="rag-header-desc">
+                Adjuster-only access to query all uploaded policy directives, liability guidelines, and claimant evidence across the entire ClaimPilot database.
+              </p>
+            </div>
+
+            <form onSubmit={handleGlobalSearch} className="search-bar-group" style={{ marginBottom: '1.5rem' }}>
+              <input
+                type="text"
+                value={globalSearchQuery}
+                onChange={(e) => setGlobalSearchQuery(e.target.value)}
+                placeholder="e.g. water damage limits, vehicle collision liability, deductibles..."
+                className="search-input"
+                style={{ fontSize: '0.95rem', padding: '0.85rem 1.25rem' }}
+              />
+              <button type="submit" disabled={globalSearchLoading} className="search-btn" style={{ padding: '0.85rem 2rem' }}>
+                {globalSearchLoading ? 'Retrieving Chunks...' : 'Global Query'}
+              </button>
+            </form>
+
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {globalSearchResults.length === 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)', padding: '3rem 0' }}>
+                  <span style={{ fontSize: '3rem', marginBottom: '1rem' }}>🌐</span>
+                  <p style={{ fontSize: '0.9rem', fontStyle: 'italic', textAlign: 'center', maxWidth: '450px' }}>
+                    Type a question above to perform a global vector similarity search across all claims, policies, and supporting documents.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  <h4 style={{ fontSize: '0.95rem', borderBottom: '1px solid var(--border-card)', paddingBottom: '0.5rem', color: 'var(--text-secondary)' }}>
+                    Top Vector Chunk Matches ({globalSearchResults.length})
+                  </h4>
+                  <div className="search-results-list">
+                    {globalSearchResults.map((res, idx) => {
+                      const simPct = Math.round(res.similarity * 100);
+                      let badgeClass = 'badge-low';
+                      if (simPct >= 75) badgeClass = 'badge-high';
+                      else if (simPct >= 50) badgeClass = 'badge-mid';
+
+                      return (
+                        <div key={idx} className="search-result-card">
+                          <div className="search-result-header">
+                            <div className="search-result-title">
+                              <span style={{ color: 'var(--accent-cyan)' }}>📄</span> {res.documentName}
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 'normal' }}>
+                                (Claim: {res.claimTitle} &middot; Owner: {res.claimantName})
+                              </span>
+                            </div>
+                            <span className={`search-result-badge ${badgeClass}`}>
+                              {simPct}% Similarity
+                            </span>
+                          </div>
+                          <p className="search-result-content">{res.content}</p>
+                          <div className="search-result-meta">
+                            <span>Chunk Index: {res.chunkIndex + 1}</span>
+                            <button
+                              onClick={() => {
+                                if (res.claimId) {
+                                  setSelectedClaimId(res.claimId);
+                                }
+                              }}
+                              className="btn btn-secondary"
+                              style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem', border: '1px solid var(--accent-cyan)', color: 'var(--accent-cyan)' }}
+                            >
+                              Inspect Claim &rarr;
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

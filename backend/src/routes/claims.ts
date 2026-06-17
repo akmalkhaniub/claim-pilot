@@ -4,6 +4,7 @@ import { AuthenticatedRequest, requireRole } from '../middleware/auth.js';
 import { query } from '../config/db.js';
 import { streamIntakeConversation, ExtractedClaimFields } from '../services/claude.js';
 import { runClaimsTriagePipeline } from '../services/triage.js';
+import { searchClaimChunks, searchAllChunks } from '../services/rag.js';
 
 const claimFieldsSchema = z.object({
   claim_type: z.enum(['Auto', 'Property', 'Health', 'General Liability']).optional(),
@@ -75,6 +76,25 @@ router.get('/', async (req: AuthenticatedRequest, res: Response): Promise<void> 
   } catch (error: any) {
     console.error('Error fetching claims:', error);
     res.status(500).json({ error: 'Failed to fetch claims' });
+  }
+});
+
+// Global RAG Search (Adjuster only)
+router.get('/search', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const queryText = req.query.q as string;
+  const limitVal = parseInt(req.query.limit as string) || 5;
+
+  if (!queryText) {
+    res.status(400).json({ error: 'Search query parameter "q" is required' });
+    return;
+  }
+
+  try {
+    const results = await searchAllChunks(queryText, limitVal);
+    res.status(200).json({ results });
+  } catch (error) {
+    console.error('Error during global RAG search route:', error);
+    res.status(500).json({ error: 'Failed to perform global RAG search' });
   }
 });
 
@@ -167,6 +187,42 @@ router.get('/:id/history', async (req: AuthenticatedRequest, res: Response): Pro
   } catch (error: any) {
     console.error('Error fetching chat history:', error);
     res.status(500).json({ error: 'Failed to fetch chat history' });
+  }
+});
+
+// Claim-specific RAG Search (Claimant owner or Adjuster)
+router.get('/:id/search', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+  const userId = req.user?.id;
+  const role = req.user?.role;
+  const queryText = req.query.q as string;
+  const limitVal = parseInt(req.query.limit as string) || 5;
+
+  if (!queryText) {
+    res.status(400).json({ error: 'Search query parameter "q" is required' });
+    return;
+  }
+
+  try {
+    // 1. Verify claim ownership
+    const claimCheck = await query('SELECT claimant_id FROM claims WHERE id = $1', [claimId]);
+    if (claimCheck.rows.length === 0) {
+      res.status(404).json({ error: 'Claim not found' });
+      return;
+    }
+
+    const claim = claimCheck.rows[0];
+    if (role !== 'adjuster' && claim.claimant_id !== userId) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    // 2. Perform search
+    const results = await searchClaimChunks(claimId, queryText, limitVal);
+    res.status(200).json({ results });
+  } catch (error) {
+    console.error('Error during claim-specific RAG search route:', error);
+    res.status(500).json({ error: 'Failed to perform claim RAG search' });
   }
 });
 

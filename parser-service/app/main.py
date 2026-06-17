@@ -87,7 +87,7 @@ def health_check():
 @app.post("/parse")
 async def parse_document(file: UploadFile = File(...)):
     """
-    Extract text content from uploaded PDF or DOCX file.
+    Extract text content from uploaded PDF, DOCX, or TXT file.
     """
     filename = file.filename
     content_type = file.content_type
@@ -105,14 +105,19 @@ async def parse_document(file: UploadFile = File(...)):
             for paragraph in doc.paragraphs:
                 if paragraph.text:
                     text += paragraph.text + "\n"
+        elif filename.endswith(".txt"):
+            content_bytes = await file.read()
+            text = content_bytes.decode("utf-8")
         else:
-            raise HTTPException(status_code=400, detail="Unsupported file format. Must be PDF or DOCX.")
+            raise HTTPException(status_code=400, detail="Unsupported file format. Must be PDF, DOCX, or TXT.")
         
         return {
             "fileName": filename,
             "fileType": content_type,
             "extractedText": text.strip()
         }
+    except HTTPException as he:
+        raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to parse document: {str(e)}")
 

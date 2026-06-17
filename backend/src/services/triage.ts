@@ -2,7 +2,7 @@ import { query } from '../config/db.js';
 import { anthropic } from './claude.js';
 import { retrieveRelevantContext } from './rag.js';
 
-const PARSER_SERVICE_URL = process.env.PARSER_SERVICE_URL || 'http://localhost:8000';
+const PARSER_SERVICE_URL = process.env.PARSER_SERVICE_URL || 'http://127.0.0.1:8000';
 
 interface TriageResult {
   score: number;
