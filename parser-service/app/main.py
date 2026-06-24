@@ -19,48 +19,106 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from abc import ABC, abstractmethod
+
 # Initialize OpenAI client
 api_key = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=api_key) if api_key else None
 
-# Local embedding model lazy-loader
-local_model = None
+
+class EmbeddingProvider(ABC):
+    @abstractmethod
+    def is_available(self) -> bool:
+        """Return True if this provider is configured and healthy."""
+        pass
+        
+    @abstractmethod
+    def embed(self, texts: List[str]) -> List[List[float]]:
+        """Generate list of embeddings for the input texts."""
+        pass
+
+
+class OpenAIEmbeddingProvider(EmbeddingProvider):
+    def __init__(self, client: Optional[OpenAI]):
+        self.client = client
+        
+    def is_available(self) -> bool:
+        return self.client is not None
+        
+    def embed(self, texts: List[str]) -> List[List[float]]:
+        if not self.client:
+            raise ValueError("OpenAI client not initialized.")
+        response = self.client.embeddings.create(
+            input=texts,
+            model="text-embedding-3-small"
+        )
+        return [data.embedding for data in response.data]
+
+
+class LocalEmbeddingProvider(EmbeddingProvider):
+    def __init__(self):
+        self.model = None
+        
+    def is_available(self) -> bool:
+        return True  # Local offline model is always available
+        
+    def embed(self, texts: List[str]) -> List[List[float]]:
+        if self.model is None:
+            print("[Parser Service] Loading local sentence-transformers model (all-MiniLM-L6-v2)...")
+            from sentence_transformers import SentenceTransformer
+            self.model = SentenceTransformer("all-MiniLM-L6-v2")
+            
+        embeddings = self.model.encode(texts).tolist()
+        
+        # Pad local 384-dimensional vectors to 1536 dimensions for DB schema compatibility
+        padded_embeddings = []
+        for emb in embeddings:
+            if len(emb) < 1536:
+                padded = np.pad(emb, (0, 1536 - len(emb)), 'constant').tolist()
+                padded_embeddings.append(padded)
+            else:
+                padded_embeddings.append(emb)
+                
+        return padded_embeddings
+
+
+class EmbeddingProviderRegistry:
+    def __init__(self):
+        self._providers: dict[str, EmbeddingProvider] = {}
+        
+    def register(self, name: str, provider: EmbeddingProvider) -> None:
+        self._providers[name] = provider
+        
+    def get(self, name: str) -> Optional[EmbeddingProvider]:
+        return self._providers.get(name)
+        
+    def select_best(self) -> EmbeddingProvider:
+        """Selector logic: choose OpenAI if configured and available, else local."""
+        openai_p = self.get("openai")
+        if openai_p and openai_p.is_available():
+            return openai_p
+        return self._providers["local"]
+
+
+# Instantiate and register providers
+registry = EmbeddingProviderRegistry()
+registry.register("openai", OpenAIEmbeddingProvider(openai_client))
+registry.register("local", LocalEmbeddingProvider())
+
 
 def get_embeddings(texts: List[str]) -> List[List[float]]:
     """
-    Generate embeddings for list of texts.
-    Falls back to local sentence-transformers if OpenAI key is not set.
+    Generate embeddings using the dynamic provider selector.
     """
-    global local_model
-    
-    if openai_client:
-        try:
-            response = openai_client.embeddings.create(
-                input=texts,
-                model="text-embedding-3-small"
-            )
-            return [data.embedding for data in response.data]
-        except Exception as e:
-            print(f"OpenAI Embedding Error: {e}. Falling back to local model.")
-    
-    # Fallback to local model
-    if local_model is None:
-        print("[Parser Service] Loading local sentence-transformers model (all-MiniLM-L6-v2)...")
-        from sentence_transformers import SentenceTransformer
-        local_model = SentenceTransformer("all-MiniLM-L6-v2")
-        
-    embeddings = local_model.encode(texts).tolist()
-    
-    # Pad local 384-dimensional vectors to 1536 dimensions for DB schema compatibility
-    padded_embeddings = []
-    for emb in embeddings:
-        if len(emb) < 1536:
-            padded = np.pad(emb, (0, 1536 - len(emb)), 'constant').tolist()
-            padded_embeddings.append(padded)
-        else:
-            padded_embeddings.append(emb)
-            
-    return padded_embeddings
+    provider = registry.select_best()
+    try:
+        return provider.embed(texts)
+    except Exception as e:
+        print(f"Primary embedding provider failed: {e}. Falling back to local model.")
+        local_p = registry.get("local")
+        if not local_p:
+            raise ValueError("Local embedding provider not registered.")
+        return local_p.embed(texts)
 
 # Schema for embedding requests
 class EmbedRequest(BaseModel):
