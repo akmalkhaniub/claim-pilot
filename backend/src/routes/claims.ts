@@ -79,6 +79,60 @@ router.get('/', async (req: AuthenticatedRequest, res: Response): Promise<void> 
   }
 });
 
+// Get claims analytics (Adjuster only)
+router.get('/analytics', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    // 1. Get status counts
+    const statusRes = await query(
+      `SELECT status, COUNT(*) as count 
+       FROM claims 
+       GROUP BY status`
+    );
+
+    // 2. Get claim type counts
+    const typeRes = await query(
+      `SELECT claim_type as "type", COUNT(*) as count 
+       FROM claims 
+       GROUP BY claim_type`
+    );
+
+    // 3. Get average risk score
+    const riskRes = await query(
+      `SELECT COALESCE(AVG(score), 0) as "avgRisk" 
+       FROM risk_scores`
+    );
+
+    // 4. Get total loss exposure and average loss amount
+    const lossRes = await query(
+      `SELECT COALESCE(SUM((regexp_replace(field_value::text, '[^0-9.]', '', 'g'))::numeric), 0) as "totalLoss",
+              COALESCE(AVG((regexp_replace(field_value::text, '[^0-9.]', '', 'g'))::numeric), 0) as "avgLoss"
+       FROM claim_fields
+       WHERE field_key = 'loss_amount' AND regexp_replace(field_value::text, '[^0-9.]', '', 'g') ~ '^[0-9.]+$'`
+    );
+
+    // 5. Get claims over time (last 7 days)
+    const trendRes = await query(
+      `SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COUNT(*) as count
+       FROM claims
+       WHERE created_at >= NOW() - INTERVAL '7 days'
+       GROUP BY TO_CHAR(created_at, 'YYYY-MM-DD')
+       ORDER BY date ASC`
+    );
+
+    res.status(200).json({
+      statusCounts: statusRes.rows,
+      typeCounts: typeRes.rows,
+      avgRisk: Number(riskRes.rows[0].avgRisk),
+      totalLoss: Number(lossRes.rows[0].totalLoss),
+      avgLoss: Number(lossRes.rows[0].avgLoss),
+      trend: trendRes.rows,
+    });
+  } catch (error) {
+    console.error('Error fetching analytics:', error);
+    res.status(500).json({ error: 'Failed to fetch analytics' });
+  }
+});
+
 // Global RAG Search (Adjuster only)
 router.get('/search', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const queryText = req.query.q as string;

@@ -258,8 +258,46 @@ export default function AdjusterDashboard() {
     <div className="app-container">
       {/* Navbar */}
       <header className="navbar">
-        <div className="nav-brand">
-          <span>\u2708</span> ClaimPilot Adjuster Portal
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
+          <div className="nav-brand">
+            <span>\u2708</span> ClaimPilot Adjuster Portal
+          </div>
+          {user && (
+            <div style={{ display: 'flex', gap: '0.25rem', background: 'rgba(255,255,255,0.03)', padding: '0.25rem', borderRadius: '8px', border: '1px solid var(--border-card)' }}>
+              <button
+                onClick={() => setActiveView('queue')}
+                style={{
+                  padding: '0.4rem 0.8rem',
+                  fontSize: '0.8rem',
+                  background: activeView === 'queue' ? 'var(--accent-cyan)' : 'transparent',
+                  color: activeView === 'queue' ? '#070a13' : 'var(--text-secondary)',
+                  borderRadius: '6px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Claims Queue
+              </button>
+              <button
+                onClick={() => setActiveView('analytics')}
+                style={{
+                  padding: '0.4rem 0.8rem',
+                  fontSize: '0.8rem',
+                  background: activeView === 'analytics' ? 'var(--accent-cyan)' : 'transparent',
+                  color: activeView === 'analytics' ? '#070a13' : 'var(--text-secondary)',
+                  borderRadius: '6px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Analytics & Trends
+              </button>
+            </div>
+          )}
         </div>
         <div className="nav-links">
           {user && <span className="nav-user">{user.fullName} ({user.email})</span>}
@@ -268,6 +306,8 @@ export default function AdjusterDashboard() {
           </button>
         </div>
       </header>
+
+      {activeView === 'queue' ? (
 
       {/* Triage Workspace Grid */}
       <main className="dashboard-grid adjuster-grid" style={{ maxWidth: '1600px' }}>
@@ -713,6 +753,118 @@ export default function AdjusterDashboard() {
         )}
 
       </main>
+      ) : (
+        <main style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto', width: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+            <div>
+              <h2 style={{ fontSize: '1.75rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
+                System-Wide Insights & Analytics
+              </h2>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Real-time operational metrics, estimated claim liability exposures, and AI risk distribution vectors.
+              </p>
+            </div>
+            <button onClick={fetchAnalytics} disabled={loadingAnalytics} className="search-btn" style={{ padding: '0.6rem 1.2rem', fontSize: '0.8rem' }}>
+              {loadingAnalytics ? 'Refreshing...' : '🔄 Refresh Data'}
+            </button>
+          </div>
+
+          {loadingAnalytics || !analytics ? (
+            <div className="glass-card" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '350px', color: 'var(--text-muted)', fontSize: '0.95rem', fontStyle: 'italic' }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ width: '40px', height: '40px', border: '3px solid var(--accent-cyan)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 1rem auto' }} />
+                Retrieving and aggregating database metrics...
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+              {/* Analytics Summary Cards Grid */}
+              <div className="analytics-grid">
+                <div className="analytics-card" style={{ '--card-accent': 'var(--accent-cyan)' } as any}>
+                  <div className="analytics-card-title">Total Claims Submitted</div>
+                  <div className="analytics-card-value">
+                    {analytics.statusCounts.reduce((acc: number, curr: any) => acc + Number(curr.count), 0)}
+                  </div>
+                  <div className="analytics-card-sub">Active in ClaimPilot Database</div>
+                </div>
+
+                <div className="analytics-card" style={{ '--card-accent': 'var(--accent-purple)' } as any}>
+                  <div className="analytics-card-title">Estimated Loss Exposure</div>
+                  <div className="analytics-card-value">
+                    ${analytics.totalLoss.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </div>
+                  <div className="analytics-card-sub">Cumulative claims exposure sum</div>
+                </div>
+
+                <div className="analytics-card" style={{ '--card-accent': 'var(--state-review)' } as any}>
+                  <div className="analytics-card-title">Average Risk Score</div>
+                  <div className="analytics-card-value">
+                    {Math.round(analytics.avgRisk * 100)}%
+                  </div>
+                  <div className="analytics-card-sub">Average AI risk scoring vector</div>
+                </div>
+
+                <div className="analytics-card" style={{ '--card-accent': 'var(--state-approved)' } as any}>
+                  <div className="analytics-card-title">Average Claim Loss</div>
+                  <div className="analytics-card-value">
+                    ${Math.round(analytics.avgLoss).toLocaleString('en-US')}
+                  </div>
+                  <div className="analytics-card-sub">Calculated average per claim</div>
+                </div>
+              </div>
+
+              {/* Main Charts Grid */}
+              <div className="charts-grid">
+                {/* 1. Status distribution */}
+                <div className="chart-card">
+                  <div className="chart-title">
+                    <span>Claims Distribution</span>
+                    <span className="chart-subtitle">By status state</span>
+                  </div>
+                  <BarChart
+                    data={['draft', 'submitted', 'under_review', 'approved', 'rejected', 'more_info_needed'].map(status => {
+                      const found = analytics.statusCounts.find((s: any) => s.status === status);
+                      return {
+                        status,
+                        count: found ? Number(found.count) : 0
+                      };
+                    })}
+                  />
+                </div>
+
+                {/* 2. Type distribution */}
+                <div className="chart-card">
+                  <div className="chart-title">
+                    <span>Insurance Type Mix</span>
+                    <span className="chart-subtitle">By claim category</span>
+                  </div>
+                  <DonutChart
+                    data={['Auto', 'Property', 'Health', 'General Liability'].map(type => {
+                      const found = analytics.typeCounts.find((t: any) => t.type === type);
+                      return {
+                        type,
+                        count: found ? Number(found.count) : 0
+                      };
+                    })}
+                  />
+                </div>
+              </div>
+
+              {/* Full Width Line Chart */}
+              <div className="chart-card" style={{ width: '100%' }}>
+                <div className="chart-title">
+                  <span>Intake Frequency Trend</span>
+                  <span className="chart-subtitle">Daily claim submission volume (last 7 days)</span>
+                </div>
+                <div style={{ padding: '0.5rem 1rem' }}>
+                  <LineChart data={getTrendData()} />
+                </div>
+              </div>
+
+            </div>
+          )}
+        </main>
+      )}
     </div>
   );
 }
