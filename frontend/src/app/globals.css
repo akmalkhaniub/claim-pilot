@@ -789,4 +789,324 @@ h1, h2, h3, h4, h5, h6 {
   fill: var(--accent-cyan);
 }
 
+/* Voice Intake & Hotline Simulator Styles */
+.hotline-btn {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: all 0.2s ease;
+  animation: pulse-green 2s infinite;
+}
+
+.hotline-btn:hover {
+  background: rgba(16, 185, 129, 0.25);
+  border-color: #10b981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+}
+
+@keyframes pulse-green {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.mic-toggle-btn {
+  background: transparent;
+  border: 1px solid var(--border-card);
+  color: var(--text-secondary);
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mic-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  border-color: var(--accent-cyan);
+}
+
+.mic-toggle-btn.recording {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border-color: #ef4444;
+  animation: pulse-red 1.5s infinite;
+}
+
+@keyframes pulse-red {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  70% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+.call-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(circle at center, rgba(14, 20, 35, 0.98) 0%, rgba(7, 10, 19, 0.99) 100%);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3rem 2rem;
+  backdrop-filter: blur(25px);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+}
+
+.call-header {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.call-badge {
+  background: rgba(0, 180, 216, 0.1);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(0, 180, 216, 0.25);
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  animation: pulse-cyan 2.5s infinite;
+}
+
+@keyframes pulse-cyan {
+  0% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 4px var(--accent-cyan));
+  }
+  100% {
+    opacity: 0.8;
+  }
+}
+
+.call-timer {
+  font-size: 1.15rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-family: monospace;
+}
+
+.call-avatar-container {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 1.5rem 0;
+}
+
+.call-avatar {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-purple) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.25rem;
+  color: #070a13;
+  z-index: 2;
+  box-shadow: 0 8px 32px rgba(0, 180, 216, 0.3);
+}
+
+.call-pulse-ring {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  opacity: 0.15;
+  z-index: 1;
+  animation: expand-ring 2s infinite ease-out;
+}
+
+.call-pulse-ring:nth-child(2) {
+  animation-delay: 0.66s;
+}
+
+.call-pulse-ring:nth-child(3) {
+  animation-delay: 1.33s;
+}
+
+@keyframes expand-ring {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.25;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+.call-status {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-top: 0.5rem;
+  font-family: 'Outfit', sans-serif;
+}
+
+.call-visualizer-wave {
+  width: 240px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.call-visualizer-bar {
+  width: 3px;
+  height: 8px;
+  background: var(--accent-cyan);
+  border-radius: 2px;
+  animation: scale-bar 1.2s infinite ease-in-out;
+}
+
+.call-visualizer-bar:nth-child(even) {
+  background: var(--accent-purple);
+  animation-delay: 0.2s;
+  height: 12px;
+}
+
+.call-visualizer-bar:nth-child(3n) {
+  animation-delay: 0.4s;
+  height: 16px;
+}
+
+.call-visualizer-bar:nth-child(4n) {
+  animation-delay: 0.6s;
+  height: 20px;
+}
+
+@keyframes scale-bar {
+  0%, 100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(2.5);
+  }
+}
+
+.call-scenarios-panel {
+  width: 100%;
+  max-width: 480px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-card);
+  padding: 1.25rem;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.call-scenario-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-card);
+  color: var(--text-secondary);
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.call-scenario-btn:hover {
+  background: rgba(0, 180, 216, 0.08);
+  border-color: var(--accent-cyan);
+  color: var(--text-primary);
+}
+
+.call-transcript-box {
+  width: 100%;
+  max-width: 480px;
+  height: 160px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-card);
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.call-transcript-line {
+  font-size: 0.825rem;
+  line-height: 1.4;
+}
+
+.call-transcript-role {
+  font-weight: 700;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.15rem;
+}
+
+.call-hangup-btn {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #ef4444;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 1.5rem;
+  box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.call-hangup-btn:hover {
+  transform: scale(1.08) rotate(-135deg);
+  background: #dc2626;
+  box-shadow: 0 10px 30px rgba(239, 68, 68, 0.6);
+}
+
+
 
