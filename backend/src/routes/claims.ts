@@ -56,6 +56,7 @@ router.get('/', async (req: AuthenticatedRequest, res: Response): Promise<void> 
     if (role === 'adjuster') {
       result = await query(
         `SELECT c.id, c.status, c.title, c.claim_type as "claimType", c.created_at as "createdAt", 
+                c.human_takeover as "humanTakeover",
                 u.full_name as "claimantName", u.email as "claimantEmail", r.score as "riskScore"
          FROM claims c
          LEFT JOIN users u ON c.claimant_id = u.id
@@ -64,7 +65,7 @@ router.get('/', async (req: AuthenticatedRequest, res: Response): Promise<void> 
       );
     } else {
       result = await query(
-        `SELECT id, status, title, claim_type as "claimType", created_at as "createdAt"
+        `SELECT id, status, title, claim_type as "claimType", human_takeover as "humanTakeover", created_at as "createdAt"
          FROM claims
          WHERE claimant_id = $1
          ORDER BY created_at DESC`,
@@ -161,7 +162,7 @@ router.get('/:id', async (req: AuthenticatedRequest, res: Response): Promise<voi
 
     // Fetch claim
     const claimResult = await query(
-      `SELECT c.id, c.claimant_id, c.status, c.title, c.claim_type as "claimType", c.created_at as "createdAt"
+      `SELECT c.id, c.claimant_id, c.status, c.title, c.claim_type as "claimType", c.human_takeover as "humanTakeover", c.created_at as "createdAt"
        FROM claims c WHERE c.id = $1`,
       [claimId]
     );
@@ -292,14 +293,34 @@ router.post('/:id/chat', requireRole(['claimant']), async (req: AuthenticatedReq
   }
 
   try {
-    // 1. Verify claim ownership
-    const claimCheck = await query('SELECT claimant_id FROM claims WHERE id = $1', [claimId]);
+    // 1. Verify claim ownership & human_takeover status
+    const claimCheck = await query('SELECT claimant_id, human_takeover FROM claims WHERE id = $1', [claimId]);
     if (claimCheck.rows.length === 0) {
       res.status(404).json({ error: 'Claim not found' });
       return;
     }
     if (claimCheck.rows[0].claimant_id !== claimantId) {
       res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    const isTakeover = claimCheck.rows[0].human_takeover;
+    if (isTakeover) {
+      // Chat is taken over by adjuster. Bypassing Claude.
+      await query(
+        `INSERT INTO audit_log (actor_id, claim_id, action, details) 
+         VALUES ($1, $2, 'chat_message', $3)`,
+        [claimantId, claimId, JSON.stringify({ role: 'user', content: message })]
+      );
+      
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+      
+      res.write(`data: ${JSON.stringify({ type: 'text', text: '' })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
       return;
     }
 
@@ -485,6 +506,91 @@ router.post('/:id/triage', requireRole(['adjuster']), async (req: AuthenticatedR
   } catch (error: any) {
     console.error('Error updating claim triage decision:', error);
     res.status(500).json({ error: 'Failed to triage claim' });
+  }
+});
+
+// Takeover Chat Toggle (Adjusters only)
+router.post('/:id/takeover', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+  const adjusterId = req.user?.id;
+  const { takeover } = req.body;
+
+  if (takeover === undefined) {
+    res.status(400).json({ error: 'Takeover state is required' });
+    return;
+  }
+
+  try {
+    const claimCheck = await query('SELECT id FROM claims WHERE id = $1', [claimId]);
+    if (claimCheck.rows.length === 0) {
+      res.status(404).json({ error: 'Claim not found' });
+      return;
+    }
+
+    // Update claim human_takeover status
+    await query('UPDATE claims SET human_takeover = $1, updated_at = NOW() WHERE id = $2', [takeover, claimId]);
+
+    // Log the takeover event in audit logs
+    const action = takeover ? 'takeover_initiated' : 'takeover_released';
+    const message = takeover 
+      ? 'System: A human adjuster has taken over this chat. The automated AI assistant is suspended.'
+      : 'System: Adjuster has left the chat. The AI assistant has resumed.';
+
+    // Insert system notice into the chat log
+    await query(
+      `INSERT INTO audit_log (actor_id, claim_id, action, details) 
+       VALUES ($1, $2, 'chat_message', $3)`,
+      [adjusterId, claimId, JSON.stringify({ role: 'assistant', content: message, isSystem: true })]
+    );
+
+    // Also log the main audit event
+    await query(
+      `INSERT INTO audit_log (actor_id, claim_id, action, details) 
+       VALUES ($1, $2, $3, $4)`,
+      [adjusterId, claimId, action, JSON.stringify({ description: takeover ? 'Human takeover enabled' : 'Human takeover disabled' })]
+    );
+
+    res.status(200).json({ success: true, human_takeover: takeover });
+  } catch (error: any) {
+    console.error('Error changing takeover status:', error);
+    res.status(500).json({ error: 'Failed to change takeover status' });
+  }
+});
+
+// Send Adjuster Message during Takeover (Adjusters only)
+router.post('/:id/adjuster-message', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+  const adjusterId = req.user?.id;
+  const { message } = req.body;
+
+  if (!message) {
+    res.status(400).json({ error: 'Message is required' });
+    return;
+  }
+
+  try {
+    const claimCheck = await query('SELECT human_takeover FROM claims WHERE id = $1', [claimId]);
+    if (claimCheck.rows.length === 0) {
+      res.status(404).json({ error: 'Claim not found' });
+      return;
+    }
+
+    if (!claimCheck.rows[0].human_takeover) {
+      res.status(400).json({ error: 'Cannot send adjuster message. Chat has not been taken over by human.' });
+      return;
+    }
+
+    // Insert message as 'assistant' with a special flag
+    await query(
+      `INSERT INTO audit_log (actor_id, claim_id, action, details) 
+       VALUES ($1, $2, 'chat_message', $3)`,
+      [adjusterId, claimId, JSON.stringify({ role: 'assistant', content: message, sender: 'adjuster' })]
+    );
+
+    res.status(200).json({ success: true });
+  } catch (error: any) {
+    console.error('Error sending adjuster message:', error);
+    res.status(500).json({ error: 'Failed to send adjuster message' });
   }
 });
 

@@ -34,3 +34,17 @@ export const query = async (text: string, params?: any[]) => {
   }
   return res;
 };
+
+// Run database schema migrations
+const runMigrations = async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE claims ADD COLUMN IF NOT EXISTS human_takeover BOOLEAN DEFAULT FALSE;
+    `);
+    console.log('[Database]: Migrations completed successfully (human_takeover column verified).');
+  } catch (err) {
+    console.error('[Database]: Migrations failed:', err);
+  }
+};
+runMigrations();
+

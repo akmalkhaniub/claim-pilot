@@ -113,6 +113,45 @@ export default function ClaimantDashboard() {
     return () => clearInterval(interval);
   }, [isCallActive, callStatus]);
 
+  // Live Handoff Polling Effect
+  useEffect(() => {
+    let pollInterval: any = null;
+    
+    if (activeClaimId && token) {
+      const pollHistory = async () => {
+        try {
+          // 1. Fetch latest claim details (in case status or takeover shifts)
+          const claimRes = await fetch(`http://localhost:3001/api/claims/${activeClaimId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (claimRes.ok) {
+            const data = await claimRes.json();
+            setActiveClaim(data.claim);
+            setFields(data.fields);
+          }
+          
+          // 2. Fetch latest history
+          const historyResponse = await fetch(`http://localhost:3001/api/claims/${activeClaimId}/history`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (historyResponse.ok) {
+            const histData = await historyResponse.json();
+            setMessages(histData.history);
+          }
+        } catch (e) {
+          console.error("Handoff polling error:", e);
+        }
+      };
+
+      // Poll every 3 seconds
+      pollInterval = setInterval(pollHistory, 3000);
+    }
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [activeClaimId, token]);
+
   // Web Audio DTMF synthesis
   const playDTMF = (freq1: number, freq2: number, duration: number = 180) => {
     try {
@@ -541,6 +580,30 @@ export default function ClaimantDashboard() {
     setChatLoading(true);
 
     try {
+      if (activeClaim?.humanTakeover) {
+        // Chat is taken over by adjuster, bypass streaming entirely
+        const res = await fetch(`http://localhost:3001/api/claims/${activeClaimId}/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ message: userMessageText })
+        });
+        
+        if (res.ok) {
+          const historyResponse = await fetch(`http://localhost:3001/api/claims/${activeClaimId}/history`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (historyResponse.ok) {
+            const histData = await historyResponse.json();
+            setMessages(histData.history);
+          }
+        }
+        setChatLoading(false);
+        return;
+      }
+
       const res = await fetch(`http://localhost:3001/api/claims/${activeClaimId}/chat`, {
         method: 'POST',
         headers: {
@@ -870,7 +933,7 @@ export default function ClaimantDashboard() {
                         Answer the agent's questions conversationally to automatically fill your claim report.
                       </p>
                     </div>
-                    {activeClaim?.status === 'draft' && (
+                    {activeClaim?.status === 'draft' && !activeClaim?.humanTakeover && (
                       <button
                         type="button"
                         onClick={startHotlineCall}
@@ -880,6 +943,23 @@ export default function ClaimantDashboard() {
                       </button>
                     )}
                   </div>
+
+                  {/* Takeover Warning Alert */}
+                  {activeClaim?.humanTakeover && (
+                    <div style={{
+                      background: 'rgba(245, 158, 11, 0.15)',
+                      borderBottom: '1px solid rgba(245, 158, 11, 0.3)',
+                      color: '#f59e0b',
+                      padding: '0.5rem 1.25rem',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}>
+                      <span>⚠️</span> Live Handoff Active: Intake AI is suspended. Adjuster has taken over the chat.
+                    </div>
+                  )}
 
                   {/* Messages Pane */}
                   <div className="chat-messages" style={{ flex: 1 }}>
@@ -894,7 +974,7 @@ export default function ClaimantDashboard() {
                         {msg.content}
                       </div>
                     ))}
-                    {chatLoading && messages[messages.length - 1]?.role === 'user' && (
+                    {chatLoading && messages[messages.length - 1]?.role === 'user' && !activeClaim?.humanTakeover && (
                       <div className="chat-bubble chat-bubble-assistant pulse-active">
                         AI is writing response...
                       </div>
@@ -904,7 +984,7 @@ export default function ClaimantDashboard() {
 
                   {/* Input Box */}
                   <form onSubmit={handleSendMessage} className="chat-input-area" style={{ gap: '0.5rem' }}>
-                    {activeClaim?.status === 'draft' && (
+                    {activeClaim?.status === 'draft' && !activeClaim?.humanTakeover && (
                       <button
                         type="button"
                         onClick={toggleDictation}
@@ -918,7 +998,7 @@ export default function ClaimantDashboard() {
                       type="text"
                       value={inputText}
                       onChange={(e) => setInputText(e.target.value)}
-                      placeholder={isDictating ? "Listening... Speak now" : "Type details of your incident here..."}
+                      placeholder={activeClaim?.humanTakeover ? "Type message directly to your adjuster..." : isDictating ? "Listening... Speak now" : "Type details of your incident here..."}
                       disabled={chatLoading || activeClaim?.status !== 'draft'}
                       className="chat-input"
                     />

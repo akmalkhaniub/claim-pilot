@@ -12,6 +12,7 @@ interface Claim {
   claimantName?: string;
   claimantEmail?: string;
   riskScore?: number | null;
+  humanTakeover?: boolean;
 }
 
 interface ClaimField {
@@ -62,6 +63,9 @@ export default function AdjusterDashboard() {
   // Split B Tab state
   const [splitBTab, setSplitBTab] = useState<'transcript' | 'search'>('transcript');
   
+  // Takeover message state
+  const [adjusterInput, setAdjusterInput] = useState('');
+  
   // Claim-specific search states
   const [claimSearchQuery, setClaimSearchQuery] = useState('');
   const [claimSearchResults, setClaimSearchResults] = useState<any[]>([]);
@@ -91,6 +95,110 @@ export default function AdjusterDashboard() {
     setToken(storedToken);
     setUser(parsedUser);
   }, [router]);
+
+  // Live Takeover Polling for Adjuster
+  useEffect(() => {
+    let interval: any = null;
+    if (selectedClaimId && token) {
+      const pollDetails = async () => {
+        try {
+          // 1. Poll claim details
+          const detailsRes = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (detailsRes.ok) {
+            const data = await detailsRes.json();
+            setSelectedClaim(data.claim);
+            setFields(data.fields);
+            setDocuments(data.documents);
+            setRiskDetails(data.riskScore);
+          }
+          
+          // 2. Poll history
+          const historyRes = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/history`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (historyRes.ok) {
+            const histData = await historyRes.json();
+            setMessages(histData.history);
+          }
+        } catch (e) {
+          console.error("Adjuster polling error:", e);
+        }
+      };
+
+      // Poll every 3 seconds
+      interval = setInterval(pollDetails, 3000);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [selectedClaimId, token]);
+
+  const handleToggleTakeover = async () => {
+    if (!selectedClaimId || !token) return;
+    const currentTakeover = selectedClaim?.humanTakeover;
+    
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/takeover`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ takeover: !currentTakeover })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedClaim(prev => prev ? { ...prev, humanTakeover: data.human_takeover } : null);
+        
+        // Refresh chat logs immediately
+        const historyRes = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/history`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (historyRes.ok) {
+          const histData = await historyRes.json();
+          setMessages(histData.history);
+        }
+      }
+    } catch (err) {
+      console.error("Error toggling takeover:", err);
+    }
+  };
+
+  const handleSendAdjusterMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adjusterInput.trim() || !selectedClaimId || !token) return;
+
+    const messageText = adjusterInput;
+    setAdjusterInput('');
+
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/adjuster-message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ message: messageText })
+      });
+
+      if (res.ok) {
+        // Refresh chat history immediately
+        const historyRes = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/history`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (historyRes.ok) {
+          const histData = await historyRes.json();
+          setMessages(histData.history);
+        }
+      }
+    } catch (err) {
+      console.error("Error sending adjuster message:", err);
+    }
+  };
 
   // Fetch all claims once authenticated
   useEffect(() => {
@@ -505,36 +613,87 @@ export default function AdjusterDashboard() {
             {/* Split B: Transcript, Claim Documents RAG Search & Human Triage Decision */}
             <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden', maxHeight: 'calc(100vh - 160px)' }}>
               
-              {/* Tab Header */}
-              <div className="search-tab-header" style={{ padding: '0.5rem 1rem 0 1rem', display: 'flex', gap: '0.5rem' }}>
-                <button
-                  onClick={() => setSplitBTab('transcript')}
-                  className={`search-tab-btn ${splitBTab === 'transcript' ? 'active' : ''}`}
-                >
-                  Intake Transcript
-                </button>
-                <button
-                  onClick={() => setSplitBTab('search')}
-                  className={`search-tab-btn ${splitBTab === 'search' ? 'active' : ''}`}
-                >
-                  Document RAG Search
-                </button>
+              {/* Tab Header with Handoff Toggle */}
+              <div className="search-tab-header" style={{ padding: '0.5rem 1rem 0 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    onClick={() => setSplitBTab('transcript')}
+                    className={`search-tab-btn ${splitBTab === 'transcript' ? 'active' : ''}`}
+                  >
+                    Intake Transcript
+                  </button>
+                  <button
+                    onClick={() => setSplitBTab('search')}
+                    className={`search-tab-btn ${splitBTab === 'search' ? 'active' : ''}`}
+                  >
+                    Document RAG Search
+                  </button>
+                </div>
+                {selectedClaim?.status === 'draft' && (
+                  <button
+                    type="button"
+                    onClick={handleToggleTakeover}
+                    style={{
+                      background: selectedClaim?.humanTakeover ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 180, 216, 0.12)',
+                      color: selectedClaim?.humanTakeover ? '#ef4444' : 'var(--accent-cyan)',
+                      border: `1px solid ${selectedClaim?.humanTakeover ? 'rgba(239, 68, 68, 0.3)' : 'rgba(0, 180, 216, 0.3)'}`,
+                      padding: '0.25rem 0.65rem',
+                      borderRadius: '6px',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    {selectedClaim?.humanTakeover ? (
+                      <>👤 Takeover Active (Release AI)</>
+                    ) : (
+                      <>🤖 AI Copilot (Take Over Chat)</>
+                    )}
+                  </button>
+                )}
               </div>
 
               {/* Tab Content */}
               {splitBTab === 'transcript' ? (
-                <div className="chat-messages" style={{ padding: '1rem', flex: 1 }}>
-                  {messages.length === 0 ? (
-                    <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.85rem', textAlign: 'center', marginTop: '2rem' }}>
-                      No messages recorded.
-                    </div>
-                  ) : (
-                    messages.map((msg, i) => (
-                      <div key={i} className={`chat-bubble chat-bubble-${msg.role}`} style={{ fontSize: '0.85rem', padding: '0.75rem' }}>
-                        <strong>{msg.role === 'user' ? 'Claimant' : 'Intake AI'}:</strong>
-                        <div style={{ marginTop: '0.25rem' }}>{msg.content}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+                  <div className="chat-messages" style={{ padding: '1rem', flex: 1, overflowY: 'auto' }}>
+                    {messages.length === 0 ? (
+                      <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.85rem', textAlign: 'center', marginTop: '2rem' }}>
+                        No messages recorded.
                       </div>
-                    ))
+                    ) : (
+                      messages.map((msg, i) => {
+                        const isSystem = (msg as any).isSystem;
+                        const senderName = isSystem ? 'System' : msg.role === 'user' ? 'Claimant' : ((msg as any).sender === 'adjuster' ? 'You (Adjuster)' : 'Intake AI');
+                        const bubbleClass = isSystem ? 'system' : msg.role;
+                        
+                        return (
+                          <div key={i} className={`chat-bubble chat-bubble-${bubbleClass}`} style={{ fontSize: '0.85rem', padding: '0.75rem', borderLeft: (msg as any).sender === 'adjuster' ? '3px solid var(--accent-cyan)' : undefined }}>
+                            <strong>{senderName}:</strong>
+                            <div style={{ marginTop: '0.25rem' }}>{msg.content}</div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Adjuster Takeover Message Input */}
+                  {selectedClaim?.humanTakeover && (
+                    <form onSubmit={handleSendAdjusterMessage} style={{ display: 'flex', gap: '0.5rem', padding: '0.75rem 1rem', borderTop: '1px solid var(--border-card)', background: 'rgba(0, 180, 216, 0.03)' }}>
+                      <input
+                        type="text"
+                        value={adjusterInput}
+                        onChange={(e) => setAdjusterInput(e.target.value)}
+                        placeholder="Type message directly to claimant..."
+                        className="chat-input"
+                        style={{ flex: 1 }}
+                      />
+                      <button type="submit" className="btn btn-primary" style={{ padding: '0.4rem 1rem' }}>Send</button>
+                    </form>
                   )}
                 </div>
               ) : (
