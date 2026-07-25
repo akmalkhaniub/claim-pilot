@@ -594,6 +594,34 @@ router.post('/:id/adjuster-message', requireRole(['adjuster']), async (req: Auth
   }
 });
 
+// Get claim compliance audit logs (Adjusters only)
+router.get('/:id/audit', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+  try {
+    const claimCheck = await query('SELECT id FROM claims WHERE id = $1', [claimId]);
+    if (claimCheck.rows.length === 0) {
+      res.status(404).json({ error: 'Claim not found' });
+      return;
+    }
+
+    const auditRes = await query(
+      `SELECT a.id, a.action, a.details, a.created_at as "createdAt", a.ip_address as "ipAddress",
+              u.full_name as "actorName", u.email as "actorEmail", u.role as "actorRole"
+       FROM audit_log a
+       LEFT JOIN users u ON a.actor_id = u.id
+       WHERE a.claim_id = $1
+       ORDER BY a.created_at ASC`,
+      [claimId]
+    );
+
+    res.status(200).json({ audit: auditRes.rows });
+  } catch (error: any) {
+    console.error('Error fetching audit logs:', error);
+    res.status(500).json({ error: 'Failed to fetch compliance audit logs' });
+  }
+});
+
+
 // A simple local async event processor for risk/similarity scoring
 // This runs in background immediately on submit. We will define it in detail in Phase 4.
 function triggerAsyncTriagePipeline(claimId: string) {
