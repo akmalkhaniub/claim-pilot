@@ -61,7 +61,11 @@ export default function AdjusterDashboard() {
   const [loadingClaims, setLoadingClaims] = useState(true);
 
   // Split B Tab state
-  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search'>('transcript');
+  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search' | 'audit'>('transcript');
+  
+  // SOC 2 Audit states
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   
   // Takeover message state
   const [adjusterInput, setAdjusterInput] = useState('');
@@ -121,6 +125,15 @@ export default function AdjusterDashboard() {
           if (historyRes.ok) {
             const histData = await historyRes.json();
             setMessages(histData.history);
+          }
+
+          // 3. Poll compliance audit logs
+          const auditRes = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/audit`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (auditRes.ok) {
+            const auditData = await auditRes.json();
+            setAuditLogs(auditData.audit || []);
           }
         } catch (e) {
           console.error("Adjuster polling error:", e);
@@ -261,6 +274,15 @@ export default function AdjusterDashboard() {
         if (historyRes.ok) {
           const histData = await historyRes.json();
           setMessages(histData.history);
+        }
+
+        // Fetch compliance audit logs
+        const auditRes = await fetch(`http://localhost:3001/api/claims/${id}/audit`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (auditRes.ok) {
+          const auditData = await auditRes.json();
+          setAuditLogs(auditData.audit || []);
         }
       }
     } catch (err) {
@@ -628,6 +650,12 @@ export default function AdjusterDashboard() {
                   >
                     Document RAG Search
                   </button>
+                  <button
+                    onClick={() => setSplitBTab('audit')}
+                    className={`search-tab-btn ${splitBTab === 'audit' ? 'active' : ''}`}
+                  >
+                    🛡️ Compliance Audit Trail
+                  </button>
                 </div>
                 {selectedClaim?.status === 'draft' && (
                   <button
@@ -696,7 +724,7 @@ export default function AdjusterDashboard() {
                     </form>
                   )}
                 </div>
-              ) : (
+              ) : splitBTab === 'search' ? (
                 <div className="rag-container" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
                   <div>
                     <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>Claim Document Search</h4>
@@ -752,6 +780,131 @@ export default function AdjusterDashboard() {
                       </div>
                     )}
                   </div>
+                </div>
+              ) : (
+                <div className="compliance-timeline-container">
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>SOC 2 Compliance Audit Timeline</h4>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      Strict, cryptographic ledger tracking of all system and user operations for this claim.
+                    </p>
+                  </div>
+                  
+                  {auditLogs.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.85rem', textAlign: 'center', marginTop: '2rem' }}>
+                      No audit events recorded yet.
+                    </div>
+                  ) : (
+                    <div className="compliance-timeline" style={{ flex: 1, overflowY: 'auto' }}>
+                      {auditLogs.map((log) => {
+                        const isExpanded = expandedLogId === log.id;
+                        const dateStr = new Date(log.createdAt).toLocaleString();
+                        
+                        let parsedDetails: any = {};
+                        try {
+                          parsedDetails = typeof log.details === 'string' ? JSON.parse(log.details) : log.details;
+                        } catch (e) {
+                          parsedDetails = log.details;
+                        }
+
+                        // Skip raw system warnings in chat logs to keep ledger focused
+                        if (log.action === 'chat_message' && parsedDetails.isSystem) {
+                          return null;
+                        }
+
+                        let actionDisplay = log.action;
+                        let summary = '';
+                        let markerClass = '';
+                        
+                        switch (log.action) {
+                          case 'CLAIM_DRAFT_CREATED':
+                            actionDisplay = '📝 Draft Claim Created';
+                            summary = `Claimant created draft titled "${parsedDetails.title || 'Untitled'}" (${parsedDetails.claimType || 'General'})`;
+                            markerClass = 'draft';
+                            break;
+                          case 'DOCUMENT_UPLOADED':
+                            actionDisplay = '📎 Document Uploaded & Indexed';
+                            summary = `File "${parsedDetails.fileName || 'document'}" uploaded. Vector chunks indexed in pgvector.`;
+                            markerClass = 'uploaded';
+                            break;
+                          case 'CLAIM_SUBMITTED':
+                            actionDisplay = '🚀 Claim Submitted for Triage';
+                            summary = `Claim submitted by claimant. Original status: "${parsedDetails.originalStatus || 'draft'}".`;
+                            markerClass = 'submit';
+                            break;
+                          case 'AUTOMATED_RISK_EVALUATED':
+                            actionDisplay = '🤖 Automated Risk Evaluation';
+                            summary = `AI copilot assessed claim risk at ${Math.round(parsedDetails.score * 100)}%. Risk flags: ${parsedDetails.risk_flags?.join(', ') || 'None'}.`;
+                            markerClass = 'triage';
+                            break;
+                          case 'takeover_initiated':
+                          case 'TAKEOVER_INITIATED':
+                            actionDisplay = '👤 Human Takeover Initiated';
+                            summary = `Adjuster took over active chat, suspending automated AI agent responses.`;
+                            markerClass = 'takeover';
+                            break;
+                          case 'takeover_released':
+                          case 'TAKEOVER_RELEASED':
+                            actionDisplay = '🤖 AI Intake Resumed';
+                            summary = `Adjuster released chat takeover. AI copilot responses resumed.`;
+                            markerClass = 'draft';
+                            break;
+                          case 'HUMAN_TRIAGE_DECISION':
+                            actionDisplay = '⚖️ Human Triage Decision';
+                            summary = `Adjuster triaged claim. Action: "${parsedDetails.action}", Next Status: "${parsedDetails.nextStatus}".`;
+                            markerClass = 'triage';
+                            break;
+                          case 'chat_message':
+                            actionDisplay = '💬 Chat Message Exchanged';
+                            summary = `${parsedDetails.role === 'user' ? 'Claimant' : (parsedDetails.sender === 'adjuster' ? 'Adjuster' : 'AI Copilot')}: "${parsedDetails.content?.substring(0, 60)}${parsedDetails.content?.length > 60 ? '...' : ''}"`;
+                            markerClass = 'uploaded';
+                            break;
+                          default:
+                            summary = `Event trigger logged: ${log.action}`;
+                        }
+
+                        return (
+                          <div key={log.id} className="timeline-item">
+                            <div className={`timeline-marker ${markerClass}`}>
+                              {log.action === 'AUTOMATED_RISK_EVALUATED' ? '🤖' : '✓'}
+                            </div>
+                            <div className="timeline-card">
+                              <div className="timeline-header">
+                                <span className="timeline-action">{actionDisplay}</span>
+                                <span className="timeline-time">{dateStr}</span>
+                              </div>
+                              <div className="timeline-actor">
+                                <span>Actor:</span>
+                                <strong>{log.actorEmail || 'System/AI'}</strong>
+                                {log.actorRole && <span className="role-badge">{log.actorRole}</span>}
+                              </div>
+                              <p className="timeline-summary">{summary}</p>
+                              {log.ipAddress && (
+                                <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                                  IP Address: {log.ipAddress}
+                                </div>
+                              )}
+                              
+                              <button
+                                onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
+                                className="timeline-toggle-details"
+                              >
+                                {isExpanded ? '▼ Hide Audit Payload' : '▶ Show Audit Payload'}
+                              </button>
+                              
+                              {isExpanded && (
+                                <div className="timeline-payload-container">
+                                  <pre className="timeline-payload">
+                                    {JSON.stringify(parsedDetails, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
