@@ -36,6 +36,13 @@ export default function ClaimantDashboard() {
   const [fields, setFields] = useState<ClaimField[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
+
+  // Smartphone notification simulator states
+  const [isPhoneOpen, setIsPhoneOpen] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [lastSeenNotifCount, setLastSeenNotifCount] = useState(0);
+  const [activeNotifId, setActiveNotifId] = useState<string | null>(null);
+  const [toastNotif, setToastNotif] = useState<{ visible: boolean; title: string; text: string; id: string } | null>(null);
   
   // UI states
   const [loadingClaims, setLoadingClaims] = useState(true);
@@ -62,6 +69,7 @@ export default function ClaimantDashboard() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  const lastSeenNotifCountRef = useRef<number>(0);
 
   // Authenticate user on mount
   useEffect(() => {
@@ -113,6 +121,33 @@ export default function ClaimantDashboard() {
     return () => clearInterval(interval);
   }, [isCallActive, callStatus]);
 
+  const playChime = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12); // A5
+      gainNode.gain.setValueAtTime(0, ctx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.05, ctx.currentTime + 0.05);
+      gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.35);
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      osc.start();
+      setTimeout(() => {
+        try {
+          osc.stop();
+          ctx.close();
+        } catch (e) {}
+      }, 400);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   // Live Handoff Polling Effect
   useEffect(() => {
     let pollInterval: any = null;
@@ -137,6 +172,37 @@ export default function ClaimantDashboard() {
           if (historyResponse.ok) {
             const histData = await historyResponse.json();
             setMessages(histData.history);
+          }
+
+          // 3. Fetch notifications
+          const notifRes = await fetch(`http://localhost:3001/api/claims/${activeClaimId}/notifications`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (notifRes.ok) {
+            const notifData = await notifRes.json();
+            const list = notifData.notifications || [];
+            setNotifications(list);
+            
+            // Check if a new notification has arrived
+            const prevCount = lastSeenNotifCountRef.current;
+            if (list.length > prevCount) {
+              const latestItem = list[list.length - 1];
+              // Trigger viewport banner
+              setToastNotif({
+                visible: true,
+                title: latestItem.type === 'email' ? '📧 New Email Received' : '💬 New SMS Alert',
+                text: latestItem.type === 'email' ? latestItem.subject : latestItem.body,
+                id: latestItem.id
+              });
+              // Play smartphone notification sound
+              playChime();
+              
+              // Dismiss banner after 4s
+              setTimeout(() => {
+                setToastNotif(prev => prev && prev.id === latestItem.id ? { ...prev, visible: false } : prev);
+              }, 4000);
+            }
+            lastSeenNotifCountRef.current = list.length;
           }
         } catch (e) {
           console.error("Handoff polling error:", e);
@@ -534,6 +600,17 @@ export default function ClaimantDashboard() {
           setMessages(histData.history);
         } else {
           setMessages([]);
+        }
+
+        // Fetch initial notifications
+        const notifRes = await fetch(`http://localhost:3001/api/claims/${id}/notifications`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (notifRes.ok) {
+          const notifData = await notifRes.json();
+          const list = notifData.notifications || [];
+          setNotifications(list);
+          lastSeenNotifCountRef.current = list.length;
         }
       }
     } catch (err) {
@@ -1270,6 +1347,161 @@ export default function ClaimantDashboard() {
           </div>
         </div>
       )}
+      {/* Real-time Push Notification Viewport Toast Banner */}
+      <div 
+        className={`viewport-notification-banner ${toastNotif && toastNotif.visible ? 'visible' : ''}`}
+        onClick={() => {
+          setIsPhoneOpen(true);
+          if (toastNotif) {
+            setActiveNotifId(toastNotif.id);
+          }
+          setToastNotif(prev => prev ? { ...prev, visible: false } : null);
+        }}
+      >
+        <span className="banner-icon">
+          {toastNotif?.title.includes('Email') ? '📧' : '💬'}
+        </span>
+        <div className="banner-content">
+          <div className="banner-title">{toastNotif?.title}</div>
+          <div className="banner-text">{toastNotif?.text}</div>
+        </div>
+      </div>
+
+      {/* Floating Toggle Device Button */}
+      {activeClaimId && (
+        <button 
+          onClick={() => {
+            setIsPhoneOpen(!isPhoneOpen);
+            setActiveNotifId(null);
+          }} 
+          className="phone-toggle-btn"
+          title="Toggle Mock Mobile Device"
+        >
+          📱
+        </button>
+      )}
+
+      {/* Slide-out Mock Smartphone Drawer */}
+      <div className={`phone-sidebar-drawer ${isPhoneOpen ? 'open' : ''}`}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '320px', marginBottom: '0.75rem', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+            Mock Device Inspector
+          </span>
+          <button 
+            onClick={() => setIsPhoneOpen(false)}
+            style={{ background: 'transparent', border: 'none', color: '#ff4d4d', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}
+          >
+            Close ✕
+          </button>
+        </div>
+
+        <div className="smartphone-mock">
+          <div className="phone-notch">
+            <div className="phone-camera" />
+          </div>
+          
+          <div className="phone-status-bar">
+            <div>9:41</div>
+            <div className="status-bar-icons">
+              <span>📶</span>
+              <span>📶</span>
+              <span>🔋 85%</span>
+            </div>
+          </div>
+          
+          <div className="phone-screen">
+            {activeNotifId ? (
+              (() => {
+                const notif = notifications.find(n => n.id === activeNotifId);
+                if (!notif) return null;
+                
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+                    <div className="phone-app-header">
+                      <button
+                        onClick={() => setActiveNotifId(null)}
+                        className="phone-back-btn"
+                      >
+                        ◀ Inbox
+                      </button>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 600, marginLeft: '0.5rem' }}>
+                        {notif.type === 'email' ? 'Mail Message' : 'SMS Chat'}
+                      </span>
+                    </div>
+                    
+                    {notif.type === 'email' ? (
+                      <div className="phone-email-view">
+                        <h2 className="email-view-subject">{notif.subject}</h2>
+                        <div className="email-view-header">
+                          <div><strong>From:</strong> {notif.sender}</div>
+                          <div><strong>To:</strong> {notif.recipient}</div>
+                          <div style={{ fontSize: '0.6rem', color: '#666', marginTop: '0.1rem' }}>
+                            {new Date(notif.timestamp).toLocaleString()}
+                          </div>
+                        </div>
+                        <div className="email-view-body">{notif.body}</div>
+                      </div>
+                    ) : (
+                      <div className="phone-sms-view">
+                        <div className="phone-app-header" style={{ background: '#111', borderBottom: '1px solid #222' }}>
+                          <strong>{notif.sender}</strong>
+                        </div>
+                        <div className="sms-chat-box">
+                          <div className="sms-bubble incoming">
+                            {notif.body}
+                            <div style={{ fontSize: '0.55rem', color: '#999', marginTop: '0.2rem', textAlign: 'right' }}>
+                              {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+                <div className="phone-app-header" style={{ justifyContent: 'center' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>
+                    Notification Center
+                  </span>
+                </div>
+                
+                <div className="phone-inbox">
+                  {notifications.length === 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#555', fontSize: '0.7rem', gap: '0.5rem', textAlign: 'center', padding: '1rem' }}>
+                      <span>🔔</span>
+                      <span>No alerts. Initiate actions (draft, upload, submit) to trigger notifications.</span>
+                    </div>
+                  ) : (
+                    [...notifications].reverse().map((notif) => {
+                      const isSMS = notif.type === 'sms';
+                      const timeStr = new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      
+                      return (
+                        <div
+                          key={notif.id}
+                          onClick={() => setActiveNotifId(notif.id)}
+                          className="phone-inbox-item"
+                        >
+                          <div className="inbox-item-header">
+                            <span>{isSMS ? '💬 SMS' : '📧 EMAIL'}</span>
+                            <span>{timeStr}</span>
+                          </div>
+                          <div className="inbox-item-sender">{notif.sender}</div>
+                          <div className="inbox-item-preview">
+                            {isSMS ? notif.body : notif.subject}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
