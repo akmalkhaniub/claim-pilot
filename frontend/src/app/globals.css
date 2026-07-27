@@ -1258,15 +1258,314 @@ h1, h2, h3, h4, h5, h6 {
   border-radius: 6px;
   padding: 0.75rem;
   overflow-x: auto;
+
+/* Mock Smartphone Notification Simulator Styles */
+.phone-toggle-btn {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  color: #070a13;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 30px rgba(0, 180, 216, 0.4);
+  z-index: 1000;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.timeline-payload {
-  font-family: monospace;
-  font-size: 0.7rem;
-  color: #a5d6ff;
-  white-space: pre-wrap;
-  margin: 0;
+.phone-toggle-btn:hover {
+  transform: scale(1.08) translateY(-2px);
+  box-shadow: 0 10px 35px rgba(0, 180, 216, 0.6);
 }
+
+.phone-sidebar-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  background: radial-gradient(circle at top right, rgba(14, 20, 35, 0.98) 0%, rgba(7, 10, 19, 0.99) 100%);
+  border-left: 1px solid var(--border-card);
+  box-shadow: -10px 0 40px rgba(0,0,0,0.6);
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  backdrop-filter: blur(25px);
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.phone-sidebar-drawer.open {
+  transform: translateX(0);
+}
+
+/* Smartphone Mockup Frame */
+.smartphone-mock {
+  width: 320px;
+  height: 640px;
+  background: #000;
+  border-radius: 40px;
+  border: 12px solid #222;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), inset 0 0 4px rgba(255,255,255,0.2);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #fff;
+}
+
+/* Speaker Notch / Dynamic Island */
+.phone-notch {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100px;
+  height: 24px;
+  background: #000;
+  border-radius: 12px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.phone-camera {
+  width: 8px;
+  height: 8px;
+  background: #111;
+  border-radius: 50%;
+  margin-left: 60px;
+}
+
+/* Status Bar */
+.phone-status-bar {
+  height: 44px;
+  padding: 14px 20px 0 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.725rem;
+  font-weight: 600;
+  background: transparent;
+  z-index: 90;
+}
+
+.status-bar-icons {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* Phone Screen Container */
+.phone-screen {
+  flex: 1;
+  background: #12141c;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Phone App Navigation / Header */
+.phone-app-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.02);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.phone-back-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent-cyan);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* Notification List screen */
+.phone-inbox {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.phone-inbox-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.phone-inbox-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--accent-cyan);
+}
+
+.phone-inbox-item.unread {
+  border-left: 3px solid var(--accent-cyan);
+}
+
+.inbox-item-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.65rem;
+  color: #888;
+  margin-bottom: 0.2rem;
+}
+
+.inbox-item-sender {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.1rem;
+}
+
+.inbox-item-preview {
+  font-size: 0.7rem;
+  color: #ccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Email Body view */
+.phone-email-view {
+  flex: 1;
+  padding: 1rem;
+  overflow-y: auto;
+  background: #181b24;
+}
+
+.email-view-subject {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  color: #fff;
+}
+
+.email-view-header {
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.7rem;
+  color: #aaa;
+  line-height: 1.4;
+}
+
+.email-view-body {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: #ddd;
+  white-space: pre-wrap;
+}
+
+/* SMS Conversation view */
+.phone-sms-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+
+.sms-chat-box {
+  flex: 1;
+  padding: 1rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sms-bubble {
+  max-width: 80%;
+  padding: 0.65rem 0.85rem;
+  border-radius: 18px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.sms-bubble.incoming {
+  background: #262629;
+  color: #fff;
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+
+.sms-bubble.outgoing {
+  background: var(--accent-cyan);
+  color: #070a13;
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+
+/* Global viewport Slide-down Notification Toast Banner */
+.viewport-notification-banner {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%) translateY(-100px);
+  width: 340px;
+  background: rgba(20, 24, 38, 0.95);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 16px;
+  padding: 0.85rem 1rem;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+  z-index: 10000;
+  backdrop-filter: blur(15px);
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  cursor: pointer;
+}
+
+.viewport-notification-banner.visible {
+  transform: translateX(-50%) translateY(0);
+}
+
+.banner-icon {
+  font-size: 1.25rem;
+  padding-top: 0.1rem;
+}
+
+.banner-content {
+  flex: 1;
+}
+
+.banner-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.15rem;
+}
+
+.banner-text {
+  font-size: 0.7rem;
+  color: #ccc;
+  line-height: 1.3;
+}
+
 
 
 
