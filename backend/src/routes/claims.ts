@@ -621,6 +621,127 @@ router.get('/:id/audit', requireRole(['adjuster']), async (req: AuthenticatedReq
   }
 });
 
+// Get claim communication notifications mapped from audit logs (Claimant & Adjuster)
+router.get('/:id/notifications', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+  const userId = req.user?.id;
+  const role = req.user?.role;
+
+  try {
+    // 1. Verify claim ownership
+    const claimCheck = await query('SELECT claimant_id, title FROM claims WHERE id = $1', [claimId]);
+    if (claimCheck.rows.length === 0) {
+      res.status(404).json({ error: 'Claim not found' });
+      return;
+    }
+    const claim = claimCheck.rows[0];
+    if (role !== 'adjuster' && claim.claimant_id !== userId) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    // 2. Fetch raw audit logs
+    const auditRes = await query(
+      `SELECT a.id, a.action, a.details, a.created_at as "createdAt"
+       FROM audit_log a
+       WHERE a.claim_id = $1
+       ORDER BY a.created_at ASC`,
+      [claimId]
+    );
+
+    // 3. Map logs to structured Email/SMS communication items
+    const notifications: any[] = [];
+    const claimCode = claimId.substring(0, 6).toUpperCase();
+
+    auditRes.rows.forEach((row) => {
+      let details: any = {};
+      try {
+        details = typeof row.details === 'string' ? JSON.parse(row.details) : row.details;
+      } catch (e) {
+        details = row.details;
+      }
+
+      switch (row.action) {
+        case 'CLAIM_DRAFT_CREATED':
+          notifications.push({
+            id: `${row.id}_notif`,
+            type: 'email',
+            sender: 'ClaimPilot Intake <intake@claimpilot.com>',
+            recipient: 'Claimant <client@claimpilot.com>',
+            subject: `Claim Draft CP-${claimCode} Initialized`,
+            body: `Dear Claimant,\n\nWe have successfully initialized a draft folder for your new claim: "${claim.title || 'Insurance Claim'}" (Type: ${details.claimType || 'Auto'}).\n\nYou can continue conversationally detailing the incident, uploading estimates/receipts, or simulating an intake call at any time.\n\nBest regards,\nClaimPilot Intake Team`,
+            timestamp: row.createdAt
+          });
+          break;
+
+        case 'DOCUMENT_UPLOADED':
+          notifications.push({
+            id: `${row.id}_notif`,
+            type: 'sms',
+            sender: 'ClaimPilot Support',
+            recipient: '+1 (555) 019-2831',
+            body: `ClaimPilot Info: Attachment "${details.fileName || 'file'}" uploaded. Document parsed and pgvector RAG chunks indexed successfully.`,
+            timestamp: row.createdAt
+          });
+          break;
+
+        case 'CLAIM_SUBMITTED':
+          notifications.push({
+            id: `${row.id}_notif`,
+            type: 'email',
+            sender: 'ClaimPilot Processing <triage@claimpilot.com>',
+            recipient: 'Claimant <client@claimpilot.com>',
+            subject: `Claim CP-${claimCode} Submitted Successfully`,
+            body: `Dear Claimant,\n\nYour claim file CP-${claimCode} has been submitted to the Automated Triage Pipeline.\n\nWe are runnning pgvector similarity cluster lookups and scanning policy exclusions. You will receive an SMS alert as soon as the auto-triage finishes.\n\nBest regards,\nClaimPilot Operations`,
+            timestamp: row.createdAt
+          });
+          break;
+
+        case 'AUTOMATED_RISK_EVALUATED':
+          notifications.push({
+            id: `${row.id}_notif`,
+            type: 'sms',
+            sender: 'ClaimPilot Risk Engine',
+            recipient: '+1 (555) 019-2831',
+            body: `ClaimPilot Alert: Automated triage completed. Assessment Score: ${Math.round(details.score * 100)}%. Risk flags: ${details.risk_flags?.join(', ') || 'None'}. File assigned to Adjuster.`,
+            timestamp: row.createdAt
+          });
+          break;
+
+        case 'takeover_initiated':
+        case 'TAKEOVER_INITIATED':
+          notifications.push({
+            id: `${row.id}_notif`,
+            type: 'sms',
+            sender: 'Triage Specialist',
+            recipient: '+1 (555) 019-2831',
+            body: `Urgent: Adjuster has taken over your claim session chat. Automated AI intake has been suspended. Please check your portal for live adjuster correspondence.`,
+            timestamp: row.createdAt
+          });
+          break;
+
+        case 'HUMAN_TRIAGE_DECISION':
+          notifications.push({
+            id: `${row.id}_notif`,
+            type: 'email',
+            sender: 'ClaimPilot Underwriting <underwriting@claimpilot.com>',
+            recipient: 'Claimant <client@claimpilot.com>',
+            subject: `Triage Decision Update: Claim CP-${claimCode} is ${details.nextStatus.toUpperCase()}`,
+            body: `Dear Claimant,\n\nYour claim status has been updated to "${details.nextStatus.toUpperCase()}".\n\nAdjuster Decision Rationale:\n"${details.rationale || 'Processed by triage specialist.'}"\n\nThank you for choosing ClaimPilot.\n\nSincerely,\nClaimPilot Underwriting Board`,
+            timestamp: row.createdAt
+          });
+          break;
+      }
+    });
+
+    res.status(200).json({ notifications });
+  } catch (error: any) {
+    console.error('Error fetching communication notifications:', error);
+    res.status(500).json({ error: 'Failed to fetch communication logs' });
+  }
+});
+
+
 
 // A simple local async event processor for risk/similarity scoring
 // This runs in background immediately on submit. We will define it in detail in Phase 4.
