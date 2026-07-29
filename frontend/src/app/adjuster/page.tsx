@@ -583,11 +583,34 @@ export default function AdjusterDashboard() {
             
             {/* Split A: Claim Meta, Docs, and pgvector RAG assessment */}
             <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxHeight: 'calc(100vh - 160px)', overflowY: 'auto' }}>
-              <div>
-                <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem' }}>{selectedClaim.title}</h3>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Submitted by {selectedClaim.claimantName} ({selectedClaim.claimantEmail})
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem' }}>{selectedClaim.title}</h3>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Submitted by {selectedClaim.claimantName} ({selectedClaim.claimantEmail})
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => window.open(`/adjuster/reports/${selectedClaim.id}`, '_blank')}
+                  className="btn btn-primary"
+                  style={{
+                    padding: '0.35rem 0.75rem',
+                    fontSize: '0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    background: 'var(--accent-cyan)',
+                    color: '#070a13',
+                    fontWeight: 700,
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 15px rgba(0, 180, 216, 0.2)'
+                  }}
+                >
+                  📄 Export Report
+                </button>
               </div>
 
               {/* AI Risk Score Assessment Box */}
