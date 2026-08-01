@@ -67,6 +67,11 @@ export default function AdjusterDashboard() {
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
+  // Historical similarity heatmap states
+  const [similarClaims, setSimilarClaims] = useState<any[]>([]);
+  const [hoveredDot, setHoveredDot] = useState<any | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+
   // Smartphone notification simulator states
   const [isPhoneOpen, setIsPhoneOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -192,6 +197,15 @@ export default function AdjusterDashboard() {
               }, 4000);
             }
             lastSeenNotifCountRef.current = list.length;
+          }
+
+          // 5. Poll similar claims
+          const similarRes = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/similar`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (similarRes.ok) {
+            const simData = await similarRes.json();
+            setSimilarClaims(simData.similar || []);
           }
         } catch (e) {
           console.error("Adjuster polling error:", e);
@@ -352,6 +366,15 @@ export default function AdjusterDashboard() {
           const list = notifData.notifications || [];
           setNotifications(list);
           lastSeenNotifCountRef.current = list.length;
+        }
+
+        // Fetch similar claims
+        const similarRes = await fetch(`http://localhost:3001/api/claims/${id}/similar`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (similarRes.ok) {
+          const simData = await similarRes.json();
+          setSimilarClaims(simData.similar || []);
         }
       }
     } catch (err) {
@@ -665,6 +688,201 @@ export default function AdjusterDashboard() {
               ) : (
                 <div style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-card)', padding: '1rem', borderRadius: '8px', fontStyle: 'italic', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                   Automated risk scoring is pending. Submit the claim to trigger assessment.
+                </div>
+              )}
+
+              {/* Historical Claim Similarity Clustering Heatmap */}
+              {similarClaims && similarClaims.length > 0 && (
+                <div className="similarity-heatmap-card">
+                  <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>Historical Similarity Cluster</span>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 'normal' }}>
+                      (pgvector Match Space)
+                    </span>
+                  </h4>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                    Bubble sizes represent semantic match index. Glowing dot marks current active claim.
+                  </p>
+
+                  <div className="similarity-scatter-container">
+                    {hoveredDot && tooltipPos && (
+                      <div className="scatter-tooltip" style={{ left: `${tooltipPos.x}px`, top: `${tooltipPos.y}px` }}>
+                        <div className="scatter-tooltip-title">{hoveredDot.title}</div>
+                        <div><strong>Type:</strong> <span style={{ textTransform: 'uppercase' }}>{hoveredDot.claimType}</span></div>
+                        <div><strong>Loss Evaluated:</strong> ${Number(hoveredDot.lossAmount).toLocaleString()}</div>
+                        <div><strong>Risk Score:</strong> {Math.round(hoveredDot.riskScore * 100)}%</div>
+                        <div><strong>Vector Match Index:</strong> {Math.round(hoveredDot.similarity * 100)}%</div>
+                        {hoveredDot.isActive && <div style={{ color: '#ef4444', fontWeight: 'bold', marginTop: '0.2rem' }}>★ CURRENT ACTIVE CLAIM</div>}
+                      </div>
+                    )}
+
+                    {(() => {
+                      const paddingX = 45;
+                      const paddingY = 30;
+                      const width = 390;
+                      const height = 180;
+
+                      const losses = similarClaims.map(c => c.lossAmount || 0);
+                      const maxLoss = Math.max(...losses, 5000);
+                      const minLoss = Math.min(...losses, 0);
+
+                      const getX = (loss: number) => {
+                        const range = maxLoss - minLoss || 1;
+                        return paddingX + ((loss - minLoss) / range) * (width - 2 * paddingX);
+                      };
+
+                      const getY = (risk: number) => {
+                        return height - paddingY - (risk * (height - 2 * paddingY));
+                      };
+
+                      const getTypeColor = (type: string) => {
+                        switch (type?.toLowerCase()) {
+                          case 'property': return '#00b4d8';
+                          case 'auto': return '#f59e0b';
+                          case 'liability': return '#ef4444';
+                          default: return '#10b981';
+                        }
+                      };
+
+                      return (
+                        <svg className="similarity-scatter-svg" viewBox={`0 0 ${width} ${height}`}>
+                          {/* Grid ticks for Y-axis (Risk) */}
+                          {[0, 0.25, 0.5, 0.75, 1.0].map((tick) => (
+                            <g key={`y-tick-${tick}`}>
+                              <line
+                                x1={paddingX}
+                                y1={getY(tick)}
+                                x2={width - paddingX}
+                                y2={getY(tick)}
+                                className="scatter-grid-line"
+                              />
+                              <text
+                                x={paddingX - 8}
+                                y={getY(tick) + 3}
+                                textAnchor="end"
+                                style={{ fill: 'var(--text-muted)', fontSize: '0.55rem', fontFamily: 'monospace' }}
+                              >
+                                {Math.round(tick * 100)}%
+                              </text>
+                            </g>
+                          ))}
+
+                          {/* Grid ticks for X-axis (Loss) */}
+                          {[0.1, 0.5, 0.9].map((ratio) => {
+                            const lossVal = minLoss + ratio * (maxLoss - minLoss);
+                            return (
+                              <g key={`x-tick-${ratio}`}>
+                                <line
+                                  x1={getX(lossVal)}
+                                  y1={paddingY}
+                                  x2={getX(lossVal)}
+                                  y2={height - paddingY}
+                                  className="scatter-grid-line"
+                                />
+                                <text
+                                  x={getX(lossVal)}
+                                  y={height - paddingY + 12}
+                                  textAnchor="middle"
+                                  style={{ fill: 'var(--text-muted)', fontSize: '0.55rem', fontFamily: 'monospace' }}
+                                >
+                                  ${Math.round(lossVal / 1000)}k
+                                </text>
+                              </g>
+                            );
+                          })}
+
+                          {/* X & Y Axes labels */}
+                          <text
+                            x={width / 2}
+                            y={height - 2}
+                            textAnchor="middle"
+                            className="scatter-axis-label"
+                          >
+                            LOSS AMOUNT (USD)
+                          </text>
+
+                          <text
+                            x={4}
+                            y={12}
+                            textAnchor="start"
+                            className="scatter-axis-label"
+                          >
+                            RISK SCORE
+                          </text>
+
+                          {/* Dots */}
+                          {similarClaims.map((c) => {
+                            const cx = getX(c.lossAmount);
+                            const cy = getY(c.riskScore);
+                            const baseRadius = 5;
+                            const r = baseRadius + (c.similarity * 8);
+
+                            return (
+                              <g key={c.id}>
+                                {c.isActive && (
+                                  <circle
+                                    cx={cx}
+                                    cy={cy}
+                                    r={r + 8}
+                                    fill="none"
+                                    stroke="#ef4444"
+                                    strokeWidth="1.5"
+                                    className="scatter-active-glow"
+                                  />
+                                )}
+                                <circle
+                                  cx={cx}
+                                  cy={cy}
+                                  r={r}
+                                  fill={getTypeColor(c.claimType)}
+                                  className="scatter-dot"
+                                  style={{
+                                    filter: c.isActive ? 'drop-shadow(0 0 6px #ef4444)' : 'none',
+                                    stroke: c.isActive ? '#fff' : 'rgba(7, 10, 19, 0.8)',
+                                    strokeWidth: c.isActive ? 2 : 1
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    const rect = e.currentTarget.parentElement?.parentElement?.getBoundingClientRect();
+                                    if (rect) {
+                                      setHoveredDot(c);
+                                      setTooltipPos({
+                                        x: e.clientX - rect.left + 10,
+                                        y: e.clientY - rect.top - 95
+                                      });
+                                    }
+                                  }}
+                                  onMouseLeave={() => setHoveredDot(null)}
+                                />
+                              </g>
+                            );
+                          })}
+                        </svg>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Legend */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginTop: '0.6rem', borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '0.5rem', justifyContent: 'center' }}>
+                    <div className="scatter-legend-item">
+                      <div className="scatter-legend-color" style={{ background: '#00b4d8' }} />
+                      <span>Property</span>
+                    </div>
+                    <div className="scatter-legend-item">
+                      <div className="scatter-legend-color" style={{ background: '#f59e0b' }} />
+                      <span>Auto</span>
+                    </div>
+                    <div className="scatter-legend-item">
+                      <div className="scatter-legend-color" style={{ background: '#ef4444' }} />
+                      <span>Liability</span>
+                    </div>
+                    <div className="scatter-legend-item">
+                      <div className="scatter-legend-color" style={{ background: '#10b981' }} />
+                      <span>Other</span>
+                    </div>
+                    <div className="scatter-legend-item" style={{ marginLeft: 'auto', fontSize: '0.6rem', opacity: 0.7 }}>
+                      ★ Active Target
+                    </div>
+                  </div>
                 </div>
               )}
 
