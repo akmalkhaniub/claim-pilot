@@ -61,7 +61,14 @@ export default function AdjusterDashboard() {
   const [loadingClaims, setLoadingClaims] = useState(true);
 
   // Split B Tab state
-  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search' | 'audit'>('transcript');
+  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search' | 'audit' | 'sandbox'>('transcript');
+
+  // RAG Triage Sandbox states
+  const [sandboxQuery, setSandboxQuery] = useState('');
+  const [sandboxLimit, setSandboxLimit] = useState(5);
+  const [sandboxThreshold, setSandboxThreshold] = useState(0.3);
+  const [sandboxResults, setSandboxResults] = useState<any[]>([]);
+  const [sandboxLoading, setSandboxLoading] = useState(false);
   
   // SOC 2 Audit states
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -435,6 +442,36 @@ export default function AdjusterDashboard() {
       console.error('Error submitting triage decision:', err);
     } finally {
       setSubmittingDecision(false);
+    }
+  };
+
+  const handleSimulateTriage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sandboxQuery.trim() || !selectedClaimId) return;
+
+    setSandboxLoading(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/simulate-triage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          q: sandboxQuery,
+          limit: sandboxLimit,
+          threshold: sandboxThreshold
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setSandboxResults(data.results || []);
+      }
+    } catch (err) {
+      console.error('Error simulating RAG triage search:', err);
+    } finally {
+      setSandboxLoading(false);
     }
   };
 
@@ -1035,6 +1072,12 @@ export default function AdjusterDashboard() {
                   >
                     🛡️ Compliance Audit Trail
                   </button>
+                  <button
+                    onClick={() => setSplitBTab('sandbox')}
+                    className={`search-tab-btn ${splitBTab === 'sandbox' ? 'active' : ''}`}
+                  >
+                    🧪 RAG Sandbox
+                  </button>
                 </div>
                 {selectedClaim?.status === 'draft' && (
                   <button
@@ -1160,7 +1203,7 @@ export default function AdjusterDashboard() {
                     )}
                   </div>
                 </div>
-              ) : (
+              ) : splitBTab === 'audit' ? (
                 <div className="compliance-timeline-container">
                   <div style={{ marginBottom: '1.25rem' }}>
                     <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>SOC 2 Compliance Audit Timeline</h4>
@@ -1284,6 +1327,102 @@ export default function AdjusterDashboard() {
                       })}
                     </div>
                   )}
+                </div>
+              ) : (
+                <div className="rag-container" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
+                  <div>
+                    <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>🧪 RAG Triage Sandbox</h4>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      Simulate vector matches by adjusting similarity thresholds and chunk limit sizes.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleSimulateTriage} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', margin: '0.75rem 0' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input
+                        type="text"
+                        value={sandboxQuery}
+                        onChange={(e) => setSandboxQuery(e.target.value)}
+                        placeholder="Type test query to match vector embeddings..."
+                        className="search-input"
+                        style={{ flex: 1 }}
+                      />
+                      <button type="submit" disabled={sandboxLoading} className="search-btn" style={{ padding: '0 1rem' }}>
+                        {sandboxLoading ? 'Simulating...' : 'Run Simulation'}
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-card)', padding: '0.75rem', borderRadius: '6px' }}>
+                      <div>
+                        <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                          <span>Similarity Threshold</span>
+                          <strong>{Math.round(sandboxThreshold * 100)}%</strong>
+                        </label>
+                        <input
+                          type="range"
+                          min="0.0"
+                          max="1.0"
+                          step="0.05"
+                          value={sandboxThreshold}
+                          onChange={(e) => setSandboxThreshold(parseFloat(e.target.value))}
+                          style={{ width: '100%', accentColor: 'var(--accent-cyan)' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                          <span>Chunk Retrieve Count Limit</span>
+                          <strong>{sandboxLimit} Chunks</strong>
+                        </label>
+                        <input
+                          type="range"
+                          min="1"
+                          max="15"
+                          step="1"
+                          value={sandboxLimit}
+                          onChange={(e) => setSandboxLimit(parseInt(e.target.value))}
+                          style={{ width: '100%', accentColor: 'var(--accent-cyan)' }}
+                        />
+                      </div>
+                    </div>
+                  </form>
+
+                  <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.25rem' }}>
+                    {sandboxResults.length === 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)', minHeight: '150px' }}>
+                        <span style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>🧪</span>
+                        <p style={{ fontSize: '0.8rem', fontStyle: 'italic', textAlign: 'center' }}>
+                          Enter search query and run simulation to preview matched embeddings chunks.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="search-results-list" style={{ gap: '0.75rem' }}>
+                        {sandboxResults.map((res, idx) => {
+                          const simPct = Math.round(res.similarity * 100);
+                          let badgeClass = 'badge-low';
+                          if (simPct >= 75) badgeClass = 'badge-high';
+                          else if (simPct >= 50) badgeClass = 'badge-mid';
+
+                          return (
+                            <div key={idx} className="search-result-card" style={{ padding: '0.875rem' }}>
+                              <div className="search-result-header" style={{ marginBottom: '0.35rem' }}>
+                                <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>📄 {res.documentName}</span>
+                                <span className={`search-result-badge ${badgeClass}`} style={{ fontSize: '0.65rem' }}>
+                                  {simPct}% Match
+                                </span>
+                              </div>
+                              <p className="search-result-content" style={{ fontSize: '0.775rem', padding: '0.4rem', background: 'rgba(255,255,255,0.01)', borderLeft: '2px solid rgba(255,255,255,0.1)', color: 'var(--text-primary)' }}>
+                                {res.content}
+                              </p>
+                              <div className="search-result-meta" style={{ marginTop: '0.35rem', fontSize: '0.65rem', display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Chunk Reference Index: {res.chunkIndex}</span>
+                                <span style={{ opacity: 0.7 }}>Score: {res.similarity.toFixed(4)}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
