@@ -24,6 +24,9 @@ export interface SearchChunkResult {
 export async function getEmbeddingForQuery(searchQuery: string): Promise<number[]> {
   try {
     console.log(`[RAG Service]: Fetching embedding for query "${searchQuery}"...`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
     const embedResponse = await fetch(`${PARSER_SERVICE_URL}/embed`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -32,7 +35,10 @@ export async function getEmbeddingForQuery(searchQuery: string): Promise<number[
         chunk_size: 500, // simple single-chunk embed
         chunk_overlap: 0,
       }),
+      signal: controller.signal
     });
+
+    clearTimeout(timeoutId);
 
     if (!embedResponse.ok) {
       throw new Error(`Failed to fetch embedding: ${embedResponse.statusText}`);
@@ -48,7 +54,7 @@ export async function getEmbeddingForQuery(searchQuery: string): Promise<number[
 
     return embedData.chunks[0].embedding;
   } catch (error) {
-    console.warn('[RAG Service] Embedding service failed, using fallback mock embedding:', error);
+    console.warn('[RAG Service] Embedding service failed or timed out, using fallback mock embedding:', error);
     // Generate mock 1536-dimension embedding for offline development
     return new Array(1536).fill(0).map(() => Math.random() - 0.5);
   }

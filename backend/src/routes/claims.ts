@@ -1126,8 +1126,7 @@ router.post('/batch-update', requireRole(['adjuster']), async (req: Authenticate
     return;
   }
 
-  const adjusterEmail = req.user?.email || 'adjuster@claimpilot.com';
-  const adjusterRole = req.user?.role || 'adjuster';
+  const adjusterId = req.user?.id;
 
   try {
     const updatedIds: string[] = [];
@@ -1157,9 +1156,9 @@ router.post('/batch-update', requireRole(['adjuster']), async (req: Authenticate
         };
 
         await query(
-          `INSERT INTO audit_log (claim_id, action, details, actor_email, actor_role)
-           VALUES ($1, 'HUMAN_TRIAGE_DECISION', $2, $3, $4)`,
-          [cid, JSON.stringify(auditDetails), adjusterEmail, adjusterRole]
+          `INSERT INTO audit_log (actor_id, claim_id, action, details)
+           VALUES ($1, $2, 'HUMAN_TRIAGE_DECISION', $3)`,
+          [adjusterId, cid, JSON.stringify(auditDetails)]
         );
       }
 
