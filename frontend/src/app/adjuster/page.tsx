@@ -72,6 +72,10 @@ export default function AdjusterDashboard() {
   const [hoveredDot, setHoveredDot] = useState<any | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
 
+  // Document verification states
+  const [verifications, setVerifications] = useState<any[]>([]);
+  const [expandedDocVerifyId, setExpandedDocVerifyId] = useState<string | null>(null);
+
   // Smartphone notification simulator states
   const [isPhoneOpen, setIsPhoneOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -206,6 +210,15 @@ export default function AdjusterDashboard() {
           if (similarRes.ok) {
             const simData = await similarRes.json();
             setSimilarClaims(simData.similar || []);
+          }
+
+          // 6. Poll document verifications
+          const verifyRes = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/document-verification`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (verifyRes.ok) {
+            const verifyData = await verifyRes.json();
+            setVerifications(verifyData.verifications || []);
           }
         } catch (e) {
           console.error("Adjuster polling error:", e);
@@ -375,6 +388,15 @@ export default function AdjusterDashboard() {
         if (similarRes.ok) {
           const simData = await similarRes.json();
           setSimilarClaims(simData.similar || []);
+        }
+
+        // Fetch document verification
+        const verifyRes = await fetch(`http://localhost:3001/api/claims/${id}/document-verification`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (verifyRes.ok) {
+          const verifyData = await verifyRes.json();
+          setVerifications(verifyData.verifications || []);
         }
       }
     } catch (err) {
@@ -911,32 +933,79 @@ export default function AdjusterDashboard() {
                     No files attached.
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {documents.map((doc) => (
-                      <div
-                        key={doc.id}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '0.625rem 0.875rem',
-                          background: 'rgba(255,255,255,0.02)',
-                          border: '1px solid var(--border-card)',
-                          borderRadius: '6px'
-                        }}
-                      >
-                        <span style={{ fontSize: '0.825rem', fontWeight: 500 }}>{doc.name}</span>
-                        <a
-                          href={`http://localhost:3001/api/claims/${selectedClaimId}/documents/${doc.id}/download`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="btn btn-secondary"
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {documents.map((doc) => {
+                      const verify = verifications.find(v => v.documentId === doc.id);
+                      
+                      return (
+                        <div
+                          key={doc.id}
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            padding: '0.75rem 0.875rem',
+                            background: 'rgba(255,255,255,0.02)',
+                            border: '1px solid var(--border-card)',
+                            borderRadius: '6px'
+                          }}
                         >
-                          View/Download
-                        </a>
-                      </div>
-                    ))}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.825rem', fontWeight: 600 }}>📄 {doc.name}</span>
+                              {verify && (
+                                <span className={`verification-badge verification-badge-${verify.overallStatus}`}>
+                                  {verify.overallStatus === 'pass' ? '✓ Verified' : (verify.overallStatus === 'fail' ? '❌ Invalid' : '⚠ Warning')}
+                                </span>
+                              )}
+                              {verify && (
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedDocVerifyId(expandedDocVerifyId === doc.id ? null : doc.id)}
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: 'var(--accent-cyan)',
+                                    cursor: 'pointer',
+                                    fontSize: '0.7rem',
+                                    fontWeight: 600,
+                                    textDecoration: 'underline',
+                                    padding: 0
+                                  }}
+                                >
+                                  {expandedDocVerifyId === doc.id ? 'Hide Details' : 'Verify Checklist'}
+                                </button>
+                              )}
+                            </div>
+                            <a
+                              href={`http://localhost:3001/api/claims/${selectedClaimId}/documents/${doc.id}/download`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="btn btn-secondary"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                            >
+                              View/Download
+                            </a>
+                          </div>
+
+                          {/* Expanded Checklist details */}
+                          {verify && expandedDocVerifyId === doc.id && (
+                            <div className="verification-checklist">
+                              {verify.checks.map((c: any, i: number) => (
+                                <div key={i} className="verification-check-item">
+                                  <span className="verification-check-icon">
+                                    {c.status === 'pass' ? '🟢' : (c.status === 'fail' ? '🔴' : '🟡')}
+                                  </span>
+                                  <div className="verification-check-details">
+                                    <div className="verification-check-name">{c.name}</div>
+                                    <div className="verification-check-text">{c.details}</div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
