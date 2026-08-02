@@ -4,7 +4,7 @@ import { AuthenticatedRequest, requireRole } from '../middleware/auth.js';
 import { query } from '../config/db.js';
 import { streamIntakeConversation, ExtractedClaimFields } from '../services/claude.js';
 import { runClaimsTriagePipeline } from '../services/triage.js';
-import { searchClaimChunks, searchAllChunks } from '../services/rag.js';
+import { searchClaimChunks, searchAllChunks, getEmbeddingForQuery } from '../services/rag.js';
 
 const claimFieldsSchema = z.object({
   claim_type: z.enum(['Auto', 'Property', 'Health', 'General Liability']).optional(),
@@ -1068,6 +1068,52 @@ router.get('/:id/document-verification', requireRole(['adjuster']), async (req: 
   } catch (error: any) {
     console.error('Error compiling document verifications:', error);
     res.status(500).json({ error: 'Failed to compile document verification checks' });
+  }
+});
+
+// Simulate triage custom RAG parameter vectors sandbox search (Adjuster only)
+router.post('/:id/simulate-triage', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+  const { q, limit, threshold } = req.body;
+
+  if (!q) {
+    res.status(400).json({ error: 'Search query parameter "q" is required' });
+    return;
+  }
+
+  const chunkLimit = parseInt(limit) || 5;
+  const matchThreshold = parseFloat(threshold) || 0.3;
+
+  try {
+    const queryEmbedding = await getEmbeddingForQuery(q);
+
+    console.log(`[Simulation]: Performing RAG vectors sandbox search in DB for claim ${claimId}...`);
+    const vectorResult = await query(
+      `SELECT dc.chunk_content as "content", 
+              1 - (dc.embedding <=> $1::vector) as "similarity",
+              dc.document_id as "documentId",
+              d.file_name as "documentName",
+              dc.chunk_index as "chunkIndex"
+       FROM document_chunks dc
+       JOIN documents d ON dc.document_id = d.id
+       WHERE d.claim_id = $2 AND (1 - (dc.embedding <=> $1::vector)) >= $3
+       ORDER BY dc.embedding <=> $1::vector ASC
+       LIMIT $4`,
+      [JSON.stringify(queryEmbedding), claimId, matchThreshold, chunkLimit]
+    );
+
+    const results = vectorResult.rows.map((row) => ({
+      content: row.content,
+      similarity: Number(row.similarity),
+      documentId: row.documentId,
+      documentName: row.documentName,
+      chunkIndex: Number(row.chunkIndex),
+    }));
+
+    res.status(200).json({ results });
+  } catch (error: any) {
+    console.error('Error executing simulated triage vector search:', error);
+    res.status(500).json({ error: 'Failed to execute simulated vector matching search' });
   }
 });
 
