@@ -69,6 +69,13 @@ export default function AdjusterDashboard() {
   const [sandboxThreshold, setSandboxThreshold] = useState(0.3);
   const [sandboxResults, setSandboxResults] = useState<any[]>([]);
   const [sandboxLoading, setSandboxLoading] = useState(false);
+
+  // Batch operations states
+  const [selectedClaimIds, setSelectedClaimIds] = useState<string[]>([]);
+  const [batchStatusAction, setBatchStatusAction] = useState<'approved' | 'rejected' | 'under_review' | ''>('');
+  const [batchRationale, setBatchRationale] = useState('');
+  const [batchReEvaluate, setBatchReEvaluate] = useState(false);
+  const [submittingBatch, setSubmittingBatch] = useState(false);
   
   // SOC 2 Audit states
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -475,6 +482,44 @@ export default function AdjusterDashboard() {
     }
   };
 
+  const handleBatchUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedClaimIds.length === 0 || !batchStatusAction) return;
+
+    setSubmittingBatch(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/batch-update`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          claimIds: selectedClaimIds,
+          status: batchStatusAction,
+          rationale: batchRationale,
+          reEvaluate: batchReEvaluate
+        })
+      });
+
+      if (res.ok) {
+        alert(`Successfully processed batch updates for ${selectedClaimIds.length} claims.`);
+        setSelectedClaimIds([]);
+        setBatchStatusAction('');
+        setBatchRationale('');
+        setBatchReEvaluate(false);
+        fetchClaims();
+      } else {
+        const data = await res.json();
+        alert(`Failed to update batch: ${data.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Error submitting batch triage:', err);
+    } finally {
+      setSubmittingBatch(false);
+    }
+  };
+
   const getRiskColor = (score: number) => {
     if (score >= 0.7) return 'var(--state-rejected)';
     if (score >= 0.4) return 'var(--state-review)';
@@ -611,6 +656,19 @@ export default function AdjusterDashboard() {
               <table className="triage-table">
                 <thead>
                   <tr>
+                    <th style={{ width: '40px', padding: '0.5rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={claims.length > 0 && selectedClaimIds.length === claims.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedClaimIds(claims.map(c => c.id));
+                          } else {
+                            setSelectedClaimIds([]);
+                          }
+                        }}
+                      />
+                    </th>
                     <th>Claim / Claimant</th>
                     <th>Risk</th>
                     <th>Status</th>
@@ -630,6 +688,19 @@ export default function AdjusterDashboard() {
                           borderLeft: selectedClaimId === c.id ? '3px solid var(--accent-cyan)' : 'none'
                         }}
                       >
+                        <td onClick={(e) => e.stopPropagation()} style={{ width: '40px', padding: '0.5rem' }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedClaimIds.includes(c.id)}
+                            onChange={() => {
+                              if (selectedClaimIds.includes(c.id)) {
+                                setSelectedClaimIds(selectedClaimIds.filter(id => id !== c.id));
+                              } else {
+                                setSelectedClaimIds([...selectedClaimIds, c.id]);
+                              }
+                            }}
+                          />
+                        </td>
                         <td>
                           <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{c.title}</div>
                           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
@@ -1850,6 +1921,139 @@ export default function AdjusterDashboard() {
           </div>
         </div>
       </div>
+      {/* Floating Bottom Batch Operations Drawer */}
+      {selectedClaimIds.length > 0 && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '90%',
+            maxWidth: '900px',
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '2px solid var(--accent-cyan)',
+            borderRadius: '12px',
+            padding: '1.25rem 1.5rem',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255,255,255,0.05)',
+            backdropFilter: 'blur(12px)',
+            zIndex: 9999,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+            animation: 'fadeInUp 0.3s ease'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <span style={{ fontSize: '1.5rem' }}>⚖️</span>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                  Batch Underwriting Simulator
+                </h4>
+                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  Applying bulk status triage decision to <strong>{selectedClaimIds.length}</strong> selected claims.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedClaimIds([])}
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: 'none',
+                color: 'var(--text-primary)',
+                padding: '0.35rem 0.75rem',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                cursor: 'pointer'
+              }}
+            >
+              Clear Selection
+            </button>
+          </div>
+
+          <form onSubmit={handleBatchUpdate} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: '200px' }}>
+              <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                Batch Action Status
+              </label>
+              <select
+                value={batchStatusAction}
+                onChange={(e) => setBatchStatusAction(e.target.value as any)}
+                required
+                style={{
+                  width: '100%',
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid var(--border-card)',
+                  borderRadius: '6px',
+                  padding: '0.5rem',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.8rem'
+                }}
+              >
+                <option value="" disabled style={{ background: '#0f172a' }}>Select action...</option>
+                <option value="approved" style={{ background: '#0f172a' }}>Approve Claims (Bulk)</option>
+                <option value="rejected" style={{ background: '#0f172a' }}>Reject Claims (Bulk)</option>
+                <option value="under_review" style={{ background: '#0f172a' }}>Set to Under Review (Bulk)</option>
+              </select>
+            </div>
+
+            <div style={{ flex: 2, minWidth: '300px' }}>
+              <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                Triage Rationale Details
+              </label>
+              <input
+                type="text"
+                value={batchRationale}
+                onChange={(e) => setBatchRationale(e.target.value)}
+                placeholder="Required justification rationale comment for audit trails..."
+                required
+                style={{
+                  width: '100%',
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid var(--border-card)',
+                  borderRadius: '6px',
+                  padding: '0.5rem',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.8rem'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', height: '36px', paddingBottom: '8px' }}>
+              <input
+                type="checkbox"
+                id="batchReEvaluate"
+                checked={batchReEvaluate}
+                onChange={(e) => setBatchReEvaluate(e.target.checked)}
+                style={{ accentColor: 'var(--accent-cyan)' }}
+              />
+              <label htmlFor="batchReEvaluate" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                Run AI Assessment
+              </label>
+            </div>
+
+            <button
+              type="submit"
+              disabled={submittingBatch}
+              style={{
+                background: 'var(--accent-cyan)',
+                color: '#070a13',
+                border: 'none',
+                padding: '0.5rem 1.25rem',
+                borderRadius: '6px',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                height: '36px'
+              }}
+            >
+              {submittingBatch ? 'Executing...' : 'Apply Batch Decisions'}
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
