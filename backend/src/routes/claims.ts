@@ -874,6 +874,203 @@ router.get('/:id/similar', requireRole(['adjuster']), async (req: AuthenticatedR
   }
 });
 
+// Get automated document verification status checklist (Adjuster only)
+router.get('/:id/document-verification', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+
+  try {
+    // 1. Fetch claimant details (user name)
+    const claimantRes = await query(
+      `SELECT u.full_name as "fullName", u.email
+       FROM claims c
+       LEFT JOIN users u ON c.claimant_id = u.id
+       WHERE c.id = $1`,
+      [claimId]
+    );
+
+    if (claimantRes.rows.length === 0) {
+      res.status(404).json({ error: 'Claim not found' });
+      return;
+    }
+
+    const claimantName = claimantRes.rows[0].fullName || '';
+
+    // 2. Fetch all documents
+    const docsRes = await query(
+      `SELECT id, file_name as "name", file_type as "type", extracted_text as "text"
+       FROM documents WHERE claim_id = $1`,
+      [claimId]
+    );
+
+    const verifications = docsRes.rows.map((doc) => {
+      const text = doc.text || '';
+      const name = doc.name || '';
+      const checks: Array<{ name: string; status: 'pass' | 'warning' | 'fail'; details: string }> = [];
+
+      // 2a. Legibility Check
+      if (text.trim().length === 0) {
+        checks.push({
+          name: 'Legibility & Scan Quality',
+          status: 'fail',
+          details: 'Extracted text is empty. Scanned file may be corrupted, blank, or blur-unreadable.'
+        });
+      } else if (text.trim().length < 60) {
+        checks.push({
+          name: 'Legibility & Scan Quality',
+          status: 'warning',
+          details: 'Extracted text is very short (< 60 chars). Scan quality may be low or illegible.'
+        });
+      } else {
+        checks.push({
+          name: 'Legibility & Scan Quality',
+          status: 'pass',
+          details: 'High text legibility density confirmed.'
+        });
+      }
+
+      // 2b. Name Matching Check (only if text is present)
+      if (text.trim().length > 0) {
+        const cleanedName = claimantName.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+        const nameTokens = cleanedName.split(/\s+/).filter(t => t.length > 2);
+        
+        let matches = false;
+        if (nameTokens.length > 0) {
+          // Check if at least one token (like last name) or full string appears in text
+          const textLower = text.toLowerCase();
+          matches = nameTokens.some(token => textLower.includes(token));
+        }
+
+        if (matches) {
+          checks.push({
+            name: 'Claimant Name Matching',
+            status: 'pass',
+            details: `Document mentions claimant name: "${claimantName}"`
+          });
+        } else {
+          checks.push({
+            name: 'Claimant Name Matching',
+            status: 'warning',
+            details: `Claimant name "${claimantName}" was not detected in document text.`
+          });
+        }
+      }
+
+      // 2c. Expiry Verification Check
+      if (text.trim().length > 0) {
+        // Look for standard date patterns: YYYY-MM-DD or MM/DD/YYYY
+        const dateRegex = /\b(\d{4}[-/]\d{1,2}[-/]\d{1,2})|(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b/g;
+        const matches = text.match(dateRegex);
+        
+        let foundExpired = false;
+        let foundOldReceipt = false;
+        let matchedDateStr = '';
+
+        if (matches && matches.length > 0) {
+          const now = new Date();
+          const oneYearAgo = new Date();
+          oneYearAgo.setFullYear(now.getFullYear() - 1);
+
+          for (const mDate of matches) {
+            try {
+              const parsedDate = new Date(mDate.replace(/-/g, '/'));
+              if (!isNaN(parsedDate.getTime())) {
+                matchedDateStr = parsedDate.toLocaleDateString();
+                // Check invoice receipt expiry
+                if (parsedDate < oneYearAgo) {
+                  foundOldReceipt = true;
+                }
+              }
+            } catch (e) {}
+          }
+        }
+
+        // Specifically search for Expiration tags for IDs/Licenses
+        const lowerText = text.toLowerCase();
+        const expRegex = /(?:expir|expires|valid thru|expiration date)[:\s]*\b(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b/i;
+        const expMatch = lowerText.match(expRegex);
+        if (expMatch && expMatch[1]) {
+          try {
+            const expDate = new Date(expMatch[1].replace(/-/g, '/'));
+            if (!isNaN(expDate.getTime()) && expDate < new Date()) {
+              foundExpired = true;
+              matchedDateStr = expDate.toLocaleDateString();
+            }
+          } catch (e) {}
+        }
+
+        if (foundExpired) {
+          checks.push({
+            name: 'Expiry Verification',
+            status: 'fail',
+            details: `Document expiration tag matched past date (${matchedDateStr}). ID/License is expired.`
+          });
+        } else if (foundOldReceipt) {
+          checks.push({
+            name: 'Expiry Verification',
+            status: 'warning',
+            details: `Receipt/invoice date is older than 1 year (${matchedDateStr}). File may exceed eligibility bounds.`
+          });
+        } else if (matchedDateStr) {
+          checks.push({
+            name: 'Expiry Verification',
+            status: 'pass',
+            details: `Document date verified within active timeframe (${matchedDateStr}).`
+          });
+        } else {
+          // If no dates matched, flag warning
+          checks.push({
+            name: 'Expiry Verification',
+            status: 'warning',
+            details: 'Could not extract valid timestamps or issue dates. Requires manual verification.'
+          });
+        }
+      }
+
+      // 2d. Document Integrity Check
+      const lowerName = name.toLowerCase();
+      const isInvoiceOrEstimate = lowerName.includes('invoice') || lowerName.includes('estimate') || lowerName.includes('receipt') || lowerName.includes('repair') || lowerName.includes('quote');
+      
+      if (isInvoiceOrEstimate && text.trim().length > 0) {
+        const textLower = text.toLowerCase();
+        const hasKeyTerms = textLower.includes('total') || textLower.includes('amount') || textLower.includes('balance') || textLower.includes('$') || textLower.includes('cost');
+        if (hasKeyTerms) {
+          checks.push({
+            name: 'Estimate / Invoice Integrity',
+            status: 'pass',
+            details: 'Structured invoice key terms (total/costs) validated.'
+          });
+        } else {
+          checks.push({
+            name: 'Estimate / Invoice Integrity',
+            status: 'warning',
+            details: 'Document labeled as invoice/estimate but lacks total cost values or price items.'
+          });
+        }
+      }
+
+      // Determine overall document status
+      let overallStatus: 'pass' | 'warning' | 'fail' = 'pass';
+      if (checks.some(c => c.status === 'fail')) {
+        overallStatus = 'fail';
+      } else if (checks.some(c => c.status === 'warning')) {
+        overallStatus = 'warning';
+      }
+
+      return {
+        documentId: doc.id,
+        fileName: doc.name,
+        overallStatus,
+        checks
+      };
+    });
+
+    res.status(200).json({ verifications });
+  } catch (error: any) {
+    console.error('Error compiling document verifications:', error);
+    res.status(500).json({ error: 'Failed to compile document verification checks' });
+  }
+});
+
 
 
 // A simple local async event processor for risk/similarity scoring
