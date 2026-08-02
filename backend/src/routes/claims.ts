@@ -1117,6 +1117,71 @@ router.post('/:id/simulate-triage', requireRole(['adjuster']), async (req: Authe
   }
 });
 
+// Batch claim underwriting status operations & updates (Adjuster only)
+router.post('/batch-update', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { claimIds, status, rationale, reEvaluate } = req.body;
+
+  if (!claimIds || !Array.isArray(claimIds) || claimIds.length === 0) {
+    res.status(400).json({ error: 'Array of claimIds is required' });
+    return;
+  }
+
+  const adjusterEmail = req.user?.email || 'adjuster@claimpilot.com';
+  const adjusterRole = req.user?.role || 'adjuster';
+
+  try {
+    const updatedIds: string[] = [];
+
+    // Process all updates in a transactional or sequence lock loop
+    for (const cid of claimIds) {
+      // 1. Fetch current status for audit trails
+      const currentRes = await query('SELECT status, title FROM claims WHERE id = $1', [cid]);
+      if (currentRes.rows.length === 0) continue;
+      
+      const currentStatus = currentRes.rows[0].status;
+      const title = currentRes.rows[0].title;
+
+      // 2. Perform updates
+      if (status) {
+        await query(
+          `UPDATE claims SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+          [status, cid]
+        );
+
+        // 3. Log compliance audit event
+        const auditDetails = {
+          action: status === 'approved' ? 'approve' : (status === 'rejected' ? 'reject' : 'more_info'),
+          rationale: rationale || 'Batch processed by triage specialist.',
+          originalStatus: currentStatus,
+          nextStatus: status
+        };
+
+        await query(
+          `INSERT INTO audit_log (claim_id, action, details, actor_email, actor_role)
+           VALUES ($1, 'HUMAN_TRIAGE_DECISION', $2, $3, $4)`,
+          [cid, JSON.stringify(auditDetails), adjusterEmail, adjusterRole]
+        );
+      }
+
+      // 4. Re-evaluate if requested
+      if (reEvaluate) {
+        try {
+          await runClaimsTriagePipeline(cid);
+        } catch (pipelineErr) {
+          console.warn(`[Batch Pipeline] Failed to evaluate claim ${cid}:`, pipelineErr);
+        }
+      }
+
+      updatedIds.push(cid);
+    }
+
+    res.status(200).json({ success: true, updatedCount: updatedIds.length, updatedClaimIds: updatedIds });
+  } catch (error: any) {
+    console.error('Error executing batch operations updates:', error);
+    res.status(500).json({ error: 'Failed to process batch underwriting operations' });
+  }
+});
+
 
 
 // A simple local async event processor for risk/similarity scoring
