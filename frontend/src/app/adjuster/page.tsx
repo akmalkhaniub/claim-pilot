@@ -61,7 +61,14 @@ export default function AdjusterDashboard() {
   const [loadingClaims, setLoadingClaims] = useState(true);
 
   // Split B Tab state
-  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search' | 'audit' | 'sandbox'>('transcript');
+  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search' | 'audit' | 'sandbox' | 'agents'>('transcript');
+
+  // Multi-Agent Simulation states
+  const [simTimeline, setSimTimeline] = useState<any[]>([]);
+  const [simConsensus, setSimConsensus] = useState<any | null>(null);
+  const [simActiveCount, setSimActiveCount] = useState(0);
+  const [simRunning, setSimRunning] = useState(false);
+  const [simLoading, setSimLoading] = useState(false);
 
   // RAG Triage Sandbox states
   const [sandboxQuery, setSandboxQuery] = useState('');
@@ -517,6 +524,48 @@ export default function AdjusterDashboard() {
       console.error('Error submitting batch triage:', err);
     } finally {
       setSubmittingBatch(false);
+    }
+  };
+
+  const handleInitiateAgentSimulation = async () => {
+    if (!selectedClaimId || simRunning || simLoading) return;
+
+    setSimLoading(true);
+    setSimTimeline([]);
+    setSimConsensus(null);
+    setSimActiveCount(0);
+
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/agent-simulation`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setSimTimeline(data.timeline || []);
+        setSimConsensus(data.consensusReport || null);
+        setSimLoading(false);
+        setSimRunning(true);
+
+        // Play sequence message by message
+        let idx = 0;
+        const total = data.timeline?.length || 0;
+        const interval = setInterval(() => {
+          idx++;
+          setSimActiveCount(idx);
+          if (idx >= total) {
+            clearInterval(interval);
+            setSimRunning(false);
+          }
+        }, 1200);
+      } else {
+        alert('Failed to initiate agent collaboration simulation');
+        setSimLoading(false);
+      }
+    } catch (err) {
+      console.error('Error simulating agent team collaboration:', err);
+      setSimLoading(false);
     }
   };
 
@@ -1149,6 +1198,12 @@ export default function AdjusterDashboard() {
                   >
                     🧪 RAG Sandbox
                   </button>
+                  <button
+                    onClick={() => setSplitBTab('agents')}
+                    className={`search-tab-btn ${splitBTab === 'agents' ? 'active' : ''}`}
+                  >
+                    🤖 Multi-Agent Team
+                  </button>
                 </div>
                 {selectedClaim?.status === 'draft' && (
                   <button
@@ -1399,7 +1454,7 @@ export default function AdjusterDashboard() {
                     </div>
                   )}
                 </div>
-              ) : (
+              ) : splitBTab === 'sandbox' ? (
                 <div className="rag-container" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
                   <div>
                     <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>🧪 RAG Triage Sandbox</h4>
@@ -1491,6 +1546,192 @@ export default function AdjusterDashboard() {
                             </div>
                           );
                         })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                    <div>
+                      <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>🤖 Multi-Agent Underwriting Team</h4>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        Observe specialized AI agents analyze parameters, check limits, and compile a consensus logs report.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleInitiateAgentSimulation}
+                      disabled={simRunning || simLoading}
+                      className="search-btn"
+                      style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', background: 'var(--accent-cyan)', color: '#070a13', fontWeight: 700 }}
+                    >
+                      {simLoading ? 'Ingesting data...' : simRunning ? 'Simulating...' : 'Initiate Collaboration'}
+                    </button>
+                  </div>
+
+                  {/* Agent Avatars Grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                    {[
+                      { role: 'FraudAuditor', title: 'Auditor Vance', desc: 'Fraud & Risk Assessment', icon: '🛡️', color: '#f59e0b' },
+                      { role: 'PolicyAnalyst', title: 'Analyst Jenkins', desc: 'Policy Coverage & Limits', icon: '📜', color: '#6366f1' },
+                      { role: 'ComplianceOfficer', title: 'Inspector Holt', desc: 'SOC 2 & Checklist Audit', icon: '⚖️', color: '#10b981' }
+                    ].map((agent, i) => {
+                      const nextMsg = simTimeline[simActiveCount];
+                      const isActive = nextMsg && nextMsg.agent === agent.role;
+                      
+                      return (
+                        <div
+                          key={i}
+                          style={{
+                            padding: '0.5rem 0.75rem',
+                            background: 'rgba(255,255,255,0.02)',
+                            border: `1.5px solid ${isActive ? 'var(--accent-cyan)' : 'var(--border-card)'}`,
+                            borderRadius: '6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            transition: 'all 0.2s ease',
+                            transform: isActive ? 'scale(1.02)' : 'scale(1.0)',
+                            boxShadow: isActive ? '0 0 10px rgba(0, 180, 216, 0.25)' : 'none'
+                          }}
+                        >
+                          <span style={{ fontSize: '1.5rem' }}>{agent.icon}</span>
+                          <div>
+                            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>{agent.title}</div>
+                            <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>{agent.desc}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Dialogue Timeline list */}
+                  <div style={{ flex: 1, overflowY: 'auto', background: 'rgba(0,0,0,0.15)', border: '1px solid var(--border-card)', borderRadius: '8px', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                    {simTimeline.length === 0 && !simLoading && (
+                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)' }}>
+                        <span style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🤖</span>
+                        <p style={{ fontSize: '0.8rem', fontStyle: 'italic', textAlign: 'center', maxWidth: '300px' }}>
+                          Click the button above to run the automated multi-agent underwriting diagnostic.
+                        </p>
+                      </div>
+                    )}
+
+                    {simLoading && (
+                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)' }}>
+                        <div style={{ width: '30px', height: '30px', border: '3px solid var(--accent-cyan)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '0.75rem' }} />
+                        <p style={{ fontSize: '0.8rem', fontStyle: 'italic' }}>Ingesting claim PostgreSQL indices & verifications logs...</p>
+                      </div>
+                    )}
+
+                    {simTimeline.slice(0, simActiveCount).map((msg: any, i: number) => {
+                      const isSystem = msg.agent === 'System';
+                      
+                      return (
+                        <div
+                          key={i}
+                          style={{
+                            display: 'flex',
+                            gap: '0.5rem',
+                            alignItems: 'flex-start',
+                            background: isSystem ? 'rgba(255,255,255,0.01)' : 'rgba(255,255,255,0.02)',
+                            padding: '0.5rem 0.75rem',
+                            borderRadius: '6px',
+                            borderLeft: isSystem ? '3px solid #818cf8' : `3px solid ${msg.agent === 'FraudAuditor' ? '#f59e0b' : (msg.agent === 'PolicyAnalyst' ? '#6366f1' : '#10b981')}`,
+                            animation: 'fadeInUp 0.25s ease'
+                          }}
+                        >
+                          <span style={{ fontSize: '1.25rem' }}>{msg.avatar}</span>
+                          <div>
+                            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)' }}>{msg.name}</div>
+                            <div style={{ fontSize: '0.775rem', marginTop: '0.15rem', color: 'var(--text-secondary)', lineHeight: '1.35' }}>
+                              {msg.text}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {simRunning && simActiveCount < simTimeline.length && (
+                      <div style={{ display: 'flex', gap: '0.5rem', padding: '0.5rem', opacity: 0.6 }}>
+                        <span style={{ animation: 'bounce 1s infinite' }}>●</span>
+                        <span style={{ animation: 'bounce 1s infinite 0.2s' }}>●</span>
+                        <span style={{ animation: 'bounce 1s infinite 0.4s' }}>●</span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: '0.25rem' }}>Agent team consulting...</span>
+                      </div>
+                    )}
+
+                    {/* Consensus Report Card */}
+                    {simActiveCount >= simTimeline.length && simConsensus && (
+                      <div
+                        style={{
+                          background: 'rgba(0, 180, 216, 0.03)',
+                          border: '2px dashed var(--accent-cyan)',
+                          borderRadius: '8px',
+                          padding: '1rem',
+                          marginTop: '0.5rem',
+                          animation: 'fadeInUp 0.4s ease'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                          <h5 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            Consensus Triage Report
+                          </h5>
+                          <span
+                            className={`badge badge-${simConsensus.consensus === 'approve' ? 'approved' : (simConsensus.consensus === 'reject' ? 'rejected' : 'review')}`}
+                            style={{ fontSize: '0.75rem', fontWeight: 700 }}
+                          >
+                            {simConsensus.consensus === 'approve' ? 'Approved (Consensus)' : (simConsensus.consensus === 'reject' ? 'Rejected (Consensus)' : 'Manual Review Referral')}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(255,255,255,0.02)', padding: '0.5rem 0.75rem', borderRadius: '6px', marginBottom: '0.75rem' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Confidence Indicator:</span>
+                          <div style={{ flex: 1, background: 'rgba(255,255,255,0.05)', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
+                            <div style={{ width: `${simConsensus.confidence}%`, height: '100%', background: 'var(--accent-cyan)' }} />
+                          </div>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-cyan)' }}>{simConsensus.confidence}%</span>
+                        </div>
+
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                          <strong>Consensus Rationale:</strong>
+                          <ul style={{ paddingLeft: '1.25rem', marginTop: '0.25rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            {simConsensus.rationale.map((r: string, idx: number) => (
+                              <li key={idx} style={{ lineHeight: '1.3' }}>{r}</li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        {simConsensus.flags?.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginBottom: '0.75rem' }}>
+                            {simConsensus.flags.map((flag: string, idx: number) => (
+                              <span key={idx} style={{ fontSize: '0.65rem', background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '0.15rem 0.35rem', borderRadius: '4px' }}>
+                                ⚠ {flag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <button
+                          onClick={() => {
+                            const rationaleText = `[Multi-Agent Consensus - Confidence ${simConsensus.confidence}%]\n` +
+                              simConsensus.rationale.map((r: string) => `- ${r}`).join('\n');
+                            setAdjusterRationale(rationaleText);
+                          }}
+                          style={{
+                            width: '100%',
+                            background: 'rgba(0, 180, 216, 0.12)',
+                            color: 'var(--accent-cyan)',
+                            border: '1px solid rgba(0, 180, 216, 0.3)',
+                            padding: '0.45rem',
+                            borderRadius: '6px',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease'
+                          }}
+                        >
+                          Adopt Agent Recommendation to Decision Pad
+                        </button>
                       </div>
                     )}
                   </div>
