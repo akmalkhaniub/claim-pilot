@@ -5,6 +5,7 @@ import { query } from '../config/db.js';
 import { streamIntakeConversation, ExtractedClaimFields } from '../services/claude.js';
 import { runClaimsTriagePipeline } from '../services/triage.js';
 import { searchClaimChunks, searchAllChunks, getEmbeddingForQuery } from '../services/rag.js';
+import { generateAgentSimulation } from '../services/agent_team.js';
 
 const claimFieldsSchema = z.object({
   claim_type: z.enum(['Auto', 'Property', 'Health', 'General Liability']).optional(),
@@ -1178,6 +1179,19 @@ router.post('/batch-update', requireRole(['adjuster']), async (req: Authenticate
   } catch (error: any) {
     console.error('Error executing batch operations updates:', error);
     res.status(500).json({ error: 'Failed to process batch underwriting operations' });
+  }
+});
+
+// Multi-Agent team triage collaboration simulation (Adjuster only)
+router.post('/:id/agent-simulation', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+
+  try {
+    const simulation = await generateAgentSimulation(claimId);
+    res.status(200).json(simulation);
+  } catch (error: any) {
+    console.error('Error running agent collaboration simulation:', error);
+    res.status(500).json({ error: error.message || 'Failed to run agent collaboration simulation' });
   }
 });
 
