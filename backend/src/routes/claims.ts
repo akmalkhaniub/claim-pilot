@@ -6,6 +6,7 @@ import { streamIntakeConversation, ExtractedClaimFields } from '../services/clau
 import { runClaimsTriagePipeline } from '../services/triage.js';
 import { searchClaimChunks, searchAllChunks, getEmbeddingForQuery } from '../services/rag.js';
 import { generateAgentSimulation } from '../services/agent_team.js';
+import { evaluateClaimRules, getCoverageRules, addCoverageRule } from '../services/rules.js';
 
 const claimFieldsSchema = z.object({
   claim_type: z.enum(['Auto', 'Property', 'Health', 'General Liability']).optional(),
@@ -1244,6 +1245,58 @@ router.post('/:id/document-chat', requireRole(['adjuster']), async (req: Authent
   } catch (error: any) {
     console.error('Error executing document chat query:', error);
     res.status(500).json({ error: 'Failed to process RAG document chat query' });
+  }
+});
+
+// Evaluate Policy Coverage Rules for a specific claim (Adjuster only)
+router.get('/:id/rules-evaluation', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+
+  try {
+    const evaluation = await evaluateClaimRules(claimId);
+    res.status(200).json(evaluation);
+  } catch (error: any) {
+    console.error('Error evaluating claim rules:', error);
+    res.status(500).json({ error: error.message || 'Failed to evaluate coverage rules' });
+  }
+});
+
+// List all active coverage rules (Adjuster only)
+router.get('/rules/definitions', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const rules = getCoverageRules();
+    res.status(200).json({ rules });
+  } catch (error: any) {
+    console.error('Error fetching coverage rules:', error);
+    res.status(500).json({ error: 'Failed to fetch rules' });
+  }
+});
+
+// Create a new custom coverage rule (Adjuster only)
+router.post('/rules/definitions', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { name, claimType, fieldKey, operator, value, severity, action, description } = req.body;
+    
+    if (!name || !fieldKey || !operator || !value) {
+      res.status(400).json({ error: 'Missing required rule parameters (name, fieldKey, operator, value)' });
+      return;
+    }
+
+    const newRule = addCoverageRule({
+      name,
+      claimType: claimType || 'All',
+      fieldKey,
+      operator,
+      value,
+      severity: severity || 'medium',
+      action: action || 'flag',
+      description: description || 'Custom adjuster validation rule.'
+    });
+
+    res.status(201).json({ success: true, rule: newRule });
+  } catch (error: any) {
+    console.error('Error creating custom rule:', error);
+    res.status(500).json({ error: 'Failed to create custom rule' });
   }
 });
 
