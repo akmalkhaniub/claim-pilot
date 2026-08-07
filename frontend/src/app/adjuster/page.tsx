@@ -70,6 +70,12 @@ export default function AdjusterDashboard() {
   const [simRunning, setSimRunning] = useState(false);
   const [simLoading, setSimLoading] = useState(false);
 
+  // RAG Document Chat states
+  const [ragChatMessages, setRagChatMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string; citations?: any[] }>>([]);
+  const [ragChatInput, setRagChatInput] = useState('');
+  const [ragChatLoading, setRagChatLoading] = useState(false);
+  const [selectedCitation, setSelectedCitation] = useState<any | null>(null);
+
   // RAG Triage Sandbox states
   const [sandboxQuery, setSandboxQuery] = useState('');
   const [sandboxLimit, setSandboxLimit] = useState(5);
@@ -566,6 +572,45 @@ export default function AdjusterDashboard() {
     } catch (err) {
       console.error('Error simulating agent team collaboration:', err);
       setSimLoading(false);
+    }
+  };
+
+  const handleRagDocumentChat = async (queryText?: string) => {
+    const q = queryText || ragChatInput;
+    if (!q.trim() || !selectedClaimId || ragChatLoading) return;
+
+    const userMsg = { role: 'user' as const, text: q };
+    setRagChatMessages(prev => [...prev, userMsg]);
+    if (!queryText) setRagChatInput('');
+    setRagChatLoading(true);
+
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/document-chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ query: q })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setRagChatMessages(prev => [...prev, {
+          role: 'assistant',
+          text: data.answer,
+          citations: data.citations || []
+        }]);
+      } else {
+        setRagChatMessages(prev => [...prev, {
+          role: 'assistant',
+          text: 'Failed to retrieve document RAG response.'
+        }]);
+      }
+    } catch (err) {
+      console.error('Error in RAG document chat:', err);
+    } finally {
+      setRagChatLoading(false);
     }
   };
 
@@ -1269,65 +1314,145 @@ export default function AdjusterDashboard() {
                         style={{ flex: 1 }}
                       />
                       <button type="submit" className="btn btn-primary" style={{ padding: '0.4rem 1rem' }}>Send</button>
-                    </form>
-                  )}
-                </div>
-              ) : splitBTab === 'search' ? (
+                    </form>              ) : splitBTab === 'search' ? (
                 <div className="rag-container" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
-                  <div>
-                    <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>Claim Document Search</h4>
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>💬 Interactive RAG Policy Chat & Citation Navigator</h4>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                      Search within this claim's attached documents using vector similarity.
+                      Query policy clauses across uploaded files. Responses extract interactive citations to source chunks.
                     </p>
                   </div>
 
-                  <form onSubmit={handleClaimSearch} className="search-bar-group" style={{ marginBottom: '1rem' }}>
-                    <input
-                      type="text"
-                      value={claimSearchQuery}
-                      onChange={(e) => setClaimSearchQuery(e.target.value)}
-                      placeholder="e.g. Is water damage covered? What is the deductible?"
-                      className="search-input"
-                    />
-                    <button type="submit" disabled={claimSearchLoading} className="search-btn">
-                      {claimSearchLoading ? 'Searching...' : 'Search'}
-                    </button>
-                  </form>
+                  {/* Quick Prompt Suggestion Chips */}
+                  <div style={{ display: 'flex', gap: '0.35rem', overflowX: 'auto', marginBottom: '0.75rem', paddingBottom: '0.25rem' }}>
+                    {[
+                      'Water damage deductible limits?',
+                      'Is mold coverage excluded?',
+                      'What are proof of loss requirements?',
+                      'Receipt date validity rules?'
+                    ].map((chip, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleRagDocumentChat(chip)}
+                        disabled={ragChatLoading}
+                        style={{
+                          background: 'rgba(0, 180, 216, 0.08)',
+                          color: 'var(--accent-cyan)',
+                          border: '1px solid rgba(0, 180, 216, 0.25)',
+                          borderRadius: '12px',
+                          padding: '0.25rem 0.65rem',
+                          fontSize: '0.7rem',
+                          whiteSpace: 'nowrap',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        💡 {chip}
+                      </button>
+                    ))}
+                  </div>
 
-                  <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.25rem' }}>
-                    {claimSearchResults.length === 0 ? (
+                  {/* RAG Chat Timeline */}
+                  <div style={{ flex: 1, overflowY: 'auto', background: 'rgba(0,0,0,0.15)', border: '1px solid var(--border-card)', borderRadius: '8px', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                    {ragChatMessages.length === 0 && (
                       <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)', minHeight: '150px' }}>
                         <span style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔍</span>
-                        <p style={{ fontSize: '0.8rem', fontStyle: 'italic', textAlign: 'center' }}>
-                          No matches found. Enter a search query to scan document chunks.
+                        <p style={{ fontSize: '0.8rem', fontStyle: 'italic', textAlign: 'center', maxWidth: '320px' }}>
+                          Type a question or click a quick prompt chip above to query policy document chunks.
                         </p>
                       </div>
-                    ) : (
-                      <div className="search-results-list" style={{ gap: '0.75rem' }}>
-                        {claimSearchResults.map((res, idx) => {
-                          const simPct = Math.round(res.similarity * 100);
-                          let badgeClass = 'badge-low';
-                          if (simPct >= 75) badgeClass = 'badge-high';
-                          else if (simPct >= 50) badgeClass = 'badge-mid';
+                    )}
 
-                          return (
-                            <div key={idx} className="search-result-card" style={{ padding: '1rem' }}>
-                              <div className="search-result-header" style={{ marginBottom: '0.5rem' }}>
-                                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>📄 {res.documentName}</span>
-                                <span className={`search-result-badge ${badgeClass}`} style={{ fontSize: '0.7rem' }}>
-                                  {simPct}% Match
-                                </span>
+                    {ragChatMessages.map((msg, i) => {
+                      const isUser = msg.role === 'user';
+
+                      return (
+                        <div
+                          key={i}
+                          style={{
+                            alignSelf: isUser ? 'flex-end' : 'flex-start',
+                            maxWidth: '85%',
+                            background: isUser ? 'rgba(0, 180, 216, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                            border: isUser ? '1px solid rgba(0, 180, 216, 0.3)' : '1px solid var(--border-card)',
+                            borderRadius: '8px',
+                            padding: '0.65rem 0.85rem',
+                            animation: 'fadeInUp 0.2s ease'
+                          }}
+                        >
+                          <div style={{ fontSize: '0.65rem', fontWeight: 700, color: isUser ? 'var(--accent-cyan)' : 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                            {isUser ? '👤 Adjuster Query' : '🤖 RAG Policy Assistant'}
+                          </div>
+                          <div style={{ fontSize: '0.775rem', color: 'var(--text-primary)', lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>
+                            {msg.text}
+                          </div>
+
+                          {/* Citation Badges */}
+                          {msg.citations && msg.citations.length > 0 && (
+                            <div style={{ marginTop: '0.65rem', paddingTop: '0.5rem', borderTop: '1px dashed var(--border-card)' }}>
+                              <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: '0.35rem', fontWeight: 600 }}>
+                                Interactive Document Citations:
                               </div>
-                              <p className="search-result-content" style={{ fontSize: '0.8rem', padding: '0.5rem' }}>{res.content}</p>
-                              <div className="search-result-meta" style={{ marginTop: '0.5rem', fontSize: '0.7rem' }}>
-                                <span>Chunk {res.chunkIndex + 1}</span>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                                {msg.citations.map((cit) => (
+                                  <button
+                                    key={cit.id}
+                                    onClick={() => setSelectedCitation(cit)}
+                                    style={{
+                                      background: 'rgba(99, 102, 241, 0.15)',
+                                      color: '#818cf8',
+                                      border: '1px solid rgba(99, 102, 241, 0.3)',
+                                      borderRadius: '4px',
+                                      padding: '0.2rem 0.45rem',
+                                      fontSize: '0.65rem',
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '0.25rem',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                  >
+                                    📄 [Citation {cit.id}: {cit.documentName}] ({Math.round(cit.similarity * 100)}% Match)
+                                  </button>
+                                ))}
                               </div>
                             </div>
-                          );
-                        })}
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {ragChatLoading && (
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', padding: '0.5rem', color: 'var(--accent-cyan)', fontSize: '0.75rem', fontStyle: 'italic' }}>
+                        <div style={{ width: '14px', height: '14px', border: '2px solid var(--accent-cyan)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                        Scanning pgvector document indices for policy clauses...
                       </div>
                     )}
                   </div>
+
+                  {/* RAG Chat Input Form */}
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleRagDocumentChat();
+                    }}
+                    style={{ display: 'flex', gap: '0.5rem' }}
+                  >
+                    <input
+                      type="text"
+                      value={ragChatInput}
+                      onChange={(e) => setRagChatInput(e.target.value)}
+                      placeholder="Ask policy question (e.g. Is mold covered? What is deductible?)..."
+                      className="search-input"
+                      style={{ flex: 1 }}
+                      disabled={ragChatLoading}
+                    />
+                    <button type="submit" disabled={ragChatLoading || !ragChatInput.trim()} className="search-btn" style={{ padding: '0 1.25rem' }}>
+                      Ask Policy RAG
+                    </button>
+                  </form>
+                </div>
+              )}       </div>
                 </div>
               ) : splitBTab === 'audit' ? (
                 <div className="compliance-timeline-container">
@@ -2293,6 +2418,75 @@ export default function AdjusterDashboard() {
               {submittingBatch ? 'Executing...' : 'Apply Batch Decisions'}
             </button>
           </form>
+        </div>
+      {/* Citation Preview Modal */}
+      {selectedCitation && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.75)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 2000,
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          <div className="glass-card" style={{ width: '90%', maxWidth: '650px', padding: '1.5rem', background: '#0d1117', border: '1px solid var(--accent-cyan)', boxShadow: '0 0 25px rgba(0, 180, 216, 0.25)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h4 style={{ margin: 0, fontSize: '1rem', color: 'var(--accent-cyan)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                📄 Citation #{selectedCitation.id}: {selectedCitation.documentName}
+              </h4>
+              <button
+                onClick={() => setSelectedCitation(null)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', fontSize: '1.25rem', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.75rem' }}>
+              <div>
+                <span style={{ color: 'var(--text-secondary)' }}>Chunk Index: </span>
+                <strong>Reference #{selectedCitation.chunkIndex}</strong>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-secondary)' }}>pgvector Cosine Match: </span>
+                <strong style={{ color: 'var(--accent-cyan)' }}>{Math.round(selectedCitation.similarity * 100)}%</strong>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1.25rem' }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                Source Document Clause Text:
+              </div>
+              <div style={{
+                background: 'rgba(0,0,0,0.3)',
+                border: '1px solid var(--border-card)',
+                borderRadius: '6px',
+                padding: '0.85rem',
+                fontSize: '0.8rem',
+                lineHeight: '1.45',
+                color: 'var(--text-primary)',
+                maxHeight: '220px',
+                overflowY: 'auto',
+                whiteSpace: 'pre-wrap'
+              }}>
+                {selectedCitation.content}
+              </div>
+            </div>
+
+            <button
+              onClick={() => setSelectedCitation(null)}
+              className="btn btn-secondary"
+              style={{ width: '100%', padding: '0.5rem', fontSize: '0.8rem' }}
+            >
+              Close Preview
+            </button>
+          </div>
         </div>
       )}
     </div>
