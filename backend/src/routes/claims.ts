@@ -1195,6 +1195,58 @@ router.post('/:id/agent-simulation', requireRole(['adjuster']), async (req: Auth
   }
 });
 
+// Interactive RAG Document Chat & Citation Navigator (Adjuster only)
+router.post('/:id/document-chat', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+  const { query: searchQuery } = req.body;
+
+  if (!searchQuery || typeof searchQuery !== 'string' || !searchQuery.trim()) {
+    res.status(400).json({ error: 'Query text is required' });
+    return;
+  }
+
+  try {
+    // 1. Retrieve top matching chunks using pgvector search
+    const chunks = await searchClaimChunks(claimId, searchQuery, 4);
+
+    if (chunks.length === 0) {
+      res.status(200).json({
+        answer: `I searched the attached policy documents and supporting files for this claim, but no relevant text chunks matched your query "${searchQuery}".`,
+        citations: []
+      });
+      return;
+    }
+
+    // 2. Map citations with metadata
+    const citations = chunks.map((c, idx) => ({
+      id: idx + 1,
+      documentId: c.documentId,
+      documentName: c.documentName,
+      chunkIndex: c.chunkIndex,
+      similarity: c.similarity,
+      content: c.content,
+    }));
+
+    // 3. Build synthesis answer
+    let synthesisText = `Based on policy documents for this claim, here are the findings for "${searchQuery}":\n\n`;
+
+    citations.forEach((cit) => {
+      const matchPct = Math.round(cit.similarity * 100);
+      synthesisText += `• In **${cit.documentName}** [Citation ${cit.id}], the clause specifies: "${cit.content.substring(0, 180)}${cit.content.length > 180 ? '...' : ''}" (Vector Match: ${matchPct}%).\n\n`;
+    });
+
+    synthesisText += `Refer to the highlighted citation badges [Citation 1] through [Citation ${citations.length}] below to inspect full text clauses and exact pgvector cosine similarity match scores.`;
+
+    res.status(200).json({
+      answer: synthesisText,
+      citations
+    });
+  } catch (error: any) {
+    console.error('Error executing document chat query:', error);
+    res.status(500).json({ error: 'Failed to process RAG document chat query' });
+  }
+});
+
 
 
 // A simple local async event processor for risk/similarity scoring
