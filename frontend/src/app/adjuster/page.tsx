@@ -61,7 +61,19 @@ export default function AdjusterDashboard() {
   const [loadingClaims, setLoadingClaims] = useState(true);
 
   // Split B Tab state
-  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search' | 'audit' | 'sandbox' | 'agents'>('transcript');
+  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search' | 'audit' | 'sandbox' | 'agents' | 'rules'>('transcript');
+
+  // Policy Coverage Rules Engine states
+  const [rulesEvaluation, setRulesEvaluation] = useState<any | null>(null);
+  const [rulesLoading, setRulesLoading] = useState(false);
+  const [showAddRuleModal, setShowAddRuleModal] = useState(false);
+  const [newRuleName, setNewRuleName] = useState('');
+  const [newRuleField, setNewRuleField] = useState('loss_amount');
+  const [newRuleOperator, setNewRuleOperator] = useState('<');
+  const [newRuleValue, setNewRuleValue] = useState('');
+  const [newRuleSeverity, setNewRuleSeverity] = useState<'low' | 'medium' | 'high' | 'critical'>('high');
+
+  // Multi-Agent Simulation states
 
   // Multi-Agent Simulation states
   const [simTimeline, setSimTimeline] = useState<any[]>([]);
@@ -260,6 +272,12 @@ export default function AdjusterDashboard() {
       if (interval) clearInterval(interval);
     };
   }, [selectedClaimId, token]);
+
+  useEffect(() => {
+    if (splitBTab === 'rules' && selectedClaimId) {
+      fetchRulesEvaluation();
+    }
+  }, [splitBTab, selectedClaimId]);
 
   const handleToggleTakeover = async () => {
     if (!selectedClaimId || !token) return;
@@ -611,6 +629,60 @@ export default function AdjusterDashboard() {
       console.error('Error in RAG document chat:', err);
     } finally {
       setRagChatLoading(false);
+    }
+  };
+
+  const fetchRulesEvaluation = async () => {
+    if (!selectedClaimId) return;
+    setRulesLoading(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/rules-evaluation`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRulesEvaluation(data);
+      }
+    } catch (err) {
+      console.error('Error fetching rules evaluation:', err);
+    } finally {
+      setRulesLoading(false);
+    }
+  };
+
+  const handleAddRuleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRuleName.trim() || !newRuleValue.trim()) return;
+
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/rules/definitions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: newRuleName,
+          claimType: 'All',
+          fieldKey: newRuleField,
+          operator: newRuleOperator,
+          value: newRuleValue,
+          severity: newRuleSeverity,
+          action: newRuleSeverity === 'critical' ? 'block' : 'flag'
+        })
+      });
+
+      if (res.ok) {
+        alert('Successfully created custom coverage rule!');
+        setNewRuleName('');
+        setNewRuleValue('');
+        setShowAddRuleModal(false);
+        fetchRulesEvaluation();
+      } else {
+        alert('Failed to add custom rule.');
+      }
+    } catch (err) {
+      console.error('Error adding rule:', err);
     }
   };
 
@@ -1249,6 +1321,12 @@ export default function AdjusterDashboard() {
                   >
                     🤖 Multi-Agent Team
                   </button>
+                  <button
+                    onClick={() => setSplitBTab('rules')}
+                    className={`search-tab-btn ${splitBTab === 'rules' ? 'active' : ''}`}
+                  >
+                    ⚡ Policy Rules Engine
+                  </button>
                 </div>
                 {selectedClaim?.status === 'draft' && (
                   <button
@@ -1857,6 +1935,126 @@ export default function AdjusterDashboard() {
                         >
                           Adopt Agent Recommendation to Decision Pad
                         </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <div>
+                      <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>⚡ Policy Coverage Rules Engine</h4>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        Automated validation rule checks evaluated dynamically against claim parameters and document verifications.
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        onClick={() => setShowAddRuleModal(true)}
+                        className="btn btn-secondary"
+                        style={{ padding: '0.4rem 0.85rem', fontSize: '0.75rem', border: '1px solid var(--accent-cyan)', color: 'var(--accent-cyan)' }}
+                      >
+                        + Add Custom Rule
+                      </button>
+                      <button
+                        onClick={fetchRulesEvaluation}
+                        disabled={rulesLoading}
+                        className="search-btn"
+                        style={{ padding: '0.4rem 1rem', fontSize: '0.75rem' }}
+                      >
+                        {rulesLoading ? 'Evaluating...' : '🔄 Re-Run Rules Engine'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Rules Evaluation Scorecard */}
+                  {rulesEvaluation && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                      <div style={{ background: 'rgba(0, 180, 216, 0.05)', border: '1px solid rgba(0, 180, 216, 0.25)', borderRadius: '6px', padding: '0.5rem 0.75rem' }}>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Compliance Score</div>
+                        <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--accent-cyan)' }}>
+                          {rulesEvaluation.complianceScore}% Compliant
+                        </div>
+                      </div>
+                      <div style={{ background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '6px', padding: '0.5rem 0.75rem' }}>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Rules Passed</div>
+                        <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#10b981' }}>
+                          🟢 {rulesEvaluation.passedCount} / {rulesEvaluation.totalRules}
+                        </div>
+                      </div>
+                      <div style={{ background: 'rgba(245, 158, 11, 0.05)', border: '1px solid rgba(245, 158, 11, 0.2)', borderRadius: '6px', padding: '0.5rem 0.75rem' }}>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Warnings Flagged</div>
+                        <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#f59e0b' }}>
+                          🟡 {rulesEvaluation.warningCount}
+                        </div>
+                      </div>
+                      <div style={{ background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '6px', padding: '0.5rem 0.75rem' }}>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Rule Violations</div>
+                        <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ef4444' }}>
+                          🔴 {rulesEvaluation.violationCount}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Rules Evaluation List Table */}
+                  <div style={{ flex: 1, overflowY: 'auto', background: 'rgba(0,0,0,0.15)', border: '1px solid var(--border-card)', borderRadius: '8px', padding: '0.75rem' }}>
+                    {!rulesEvaluation && !rulesLoading && (
+                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)' }}>
+                        <span style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>⚡</span>
+                        <p style={{ fontSize: '0.8rem', fontStyle: 'italic' }}>Click Re-Run Rules Engine to evaluate coverage rules.</p>
+                      </div>
+                    )}
+
+                    {rulesLoading && (
+                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)' }}>
+                        <div style={{ width: '30px', height: '30px', border: '3px solid var(--accent-cyan)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '0.75rem' }} />
+                        <p style={{ fontSize: '0.8rem', fontStyle: 'italic' }}>Evaluating policy compliance conditions against PostgreSQL fields...</p>
+                      </div>
+                    )}
+
+                    {rulesEvaluation && rulesEvaluation.results && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {rulesEvaluation.results.map((res: any, idx: number) => {
+                          const statusIcon = res.passed ? '🟢 PASSED' : (res.severity === 'critical' ? '🔴 VIOLATION BLOCK' : '🟡 FLAG WARNING');
+                          const statusBg = res.passed ? 'rgba(16, 185, 129, 0.08)' : (res.severity === 'critical' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(245, 158, 11, 0.1)');
+                          const statusBorder = res.passed ? 'rgba(16, 185, 129, 0.25)' : (res.severity === 'critical' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(245, 158, 11, 0.3)');
+
+                          return (
+                            <div
+                              key={idx}
+                              style={{
+                                background: statusBg,
+                                border: `1px solid ${statusBorder}`,
+                                borderRadius: '6px',
+                                padding: '0.65rem 0.85rem',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                              }}
+                            >
+                              <div style={{ flex: 1 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
+                                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>{res.ruleName}</span>
+                                  <span style={{ fontSize: '0.65rem', background: 'rgba(255,255,255,0.05)', padding: '0.1rem 0.35rem', borderRadius: '4px', color: 'var(--text-secondary)' }}>
+                                    Severity: {res.severity.toUpperCase()}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: '1.3' }}>
+                                  {res.message}
+                                </div>
+                              </div>
+                              <div style={{ textAlign: 'right', marginLeft: '1rem' }}>
+                                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: res.passed ? '#10b981' : (res.severity === 'critical' ? '#ef4444' : '#f59e0b') }}>
+                                  {statusIcon}
+                                </div>
+                                <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                  Value: {res.actualValue}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -2486,6 +2684,78 @@ export default function AdjusterDashboard() {
             >
               Close Preview
             </button>
+          </div>
+        </div>
+      {/* Add Custom Rule Modal */}
+      {showAddRuleModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.75)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 2000,
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          <div className="glass-card" style={{ width: '90%', maxWidth: '500px', padding: '1.5rem', background: '#0d1117', border: '1px solid var(--accent-cyan)', boxShadow: '0 0 25px rgba(0, 180, 216, 0.25)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h4 style={{ margin: 0, fontSize: '1rem', color: 'var(--accent-cyan)' }}>⚡ Create Custom Validation Rule</h4>
+              <button onClick={() => setShowAddRuleModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', fontSize: '1.25rem', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            <form onSubmit={handleAddRuleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Rule Name</label>
+                <input type="text" value={newRuleName} onChange={(e) => setNewRuleName(e.target.value)} placeholder="e.g. Senior Adjuster Review Rule" className="search-input" style={{ width: '100%' }} required />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Field Key</label>
+                  <select value={newRuleField} onChange={(e) => setNewRuleField(e.target.value)} className="search-input" style={{ width: '100%', height: '36px' }}>
+                    <option value="loss_amount">Loss Amount</option>
+                    <option value="risk_score">Risk Score</option>
+                    <option value="documents_count">Documents Count</option>
+                    <option value="name_verification">Name Verification</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Operator</label>
+                  <select value={newRuleOperator} onChange={(e) => setNewRuleOperator(e.target.value as any)} className="search-input" style={{ width: '100%', height: '36px' }}>
+                    <option value="<">&lt; Less Than</option>
+                    <option value=">">&gt; Greater Than</option>
+                    <option value="==">== Equals</option>
+                    <option value="!=">!= Not Equals</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Target Value</label>
+                  <input type="text" value={newRuleValue} onChange={(e) => setNewRuleValue(e.target.value)} placeholder="e.g. 5000 or 0.5" className="search-input" style={{ width: '100%' }} required />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Severity</label>
+                  <select value={newRuleSeverity} onChange={(e) => setNewRuleSeverity(e.target.value as any)} className="search-input" style={{ width: '100%', height: '36px' }}>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="critical">Critical (Block)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                <button type="button" onClick={() => setShowAddRuleModal(false)} className="btn btn-secondary" style={{ flex: 1 }}>Cancel</button>
+                <button type="submit" className="search-btn" style={{ flex: 1 }}>Add Rule</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
