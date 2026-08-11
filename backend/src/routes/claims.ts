@@ -7,6 +7,7 @@ import { runClaimsTriagePipeline } from '../services/triage.js';
 import { searchClaimChunks, searchAllChunks, getEmbeddingForQuery } from '../services/rag.js';
 import { generateAgentSimulation } from '../services/agent_team.js';
 import { evaluateClaimRules, getCoverageRules, addCoverageRule } from '../services/rules.js';
+import { evaluateNegotiationTurn, finalizeClaimSettlement } from '../services/negotiation.js';
 
 const claimFieldsSchema = z.object({
   claim_type: z.enum(['Auto', 'Property', 'Health', 'General Liability']).optional(),
@@ -1297,6 +1298,50 @@ router.post('/rules/definitions', requireRole(['adjuster']), async (req: Authent
   } catch (error: any) {
     console.error('Error creating custom rule:', error);
     res.status(500).json({ error: 'Failed to create custom rule' });
+  }
+});
+
+// Process a settlement negotiation turn (Adjuster only)
+router.post('/:id/negotiation-turn', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+  const { adjusterOffer, message } = req.body;
+
+  if (typeof adjusterOffer !== 'number' || adjusterOffer <= 0) {
+    res.status(400).json({ error: 'Valid adjusterOffer numeric amount is required' });
+    return;
+  }
+
+  try {
+    const turnResult = await evaluateNegotiationTurn(claimId, adjusterOffer, message);
+    res.status(200).json(turnResult);
+  } catch (error: any) {
+    console.error('Error processing negotiation turn:', error);
+    res.status(500).json({ error: error.message || 'Failed to process negotiation turn' });
+  }
+});
+
+// Finalize settlement and lock payout (Adjuster only)
+router.post('/:id/finalize-settlement', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+  const { finalAmount } = req.body;
+  const actorId = req.user?.id;
+
+  if (typeof finalAmount !== 'number' || finalAmount <= 0) {
+    res.status(400).json({ error: 'Valid finalAmount numeric payout is required' });
+    return;
+  }
+
+  if (!actorId) {
+    res.status(401).json({ error: 'Unauthorized actor' });
+    return;
+  }
+
+  try {
+    const finalResult = await finalizeClaimSettlement(claimId, finalAmount, actorId);
+    res.status(200).json(finalResult);
+  } catch (error: any) {
+    console.error('Error finalizing claim settlement:', error);
+    res.status(500).json({ error: error.message || 'Failed to finalize claim settlement' });
   }
 });
 
