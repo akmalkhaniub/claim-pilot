@@ -61,7 +61,25 @@ export default function AdjusterDashboard() {
   const [loadingClaims, setLoadingClaims] = useState(true);
 
   // Split B Tab state
-  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search' | 'audit' | 'sandbox' | 'agents' | 'rules'>('transcript');
+  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search' | 'audit' | 'sandbox' | 'agents' | 'rules' | 'negotiate'>('transcript');
+
+  // Settlement Negotiation Simulator states
+  const [negMessages, setNegMessages] = useState<Array<{ role: 'adjuster' | 'claimant'; text: string; offer?: number }>>([]);
+  const [negOfferInput, setNegOfferInput] = useState<number>(5000);
+  const [negMessageInput, setNegMessageInput] = useState('');
+  const [negMetrics, setNegMetrics] = useState<{
+    claimantName?: string;
+    originalLossAmount?: number;
+    policyCapAmount?: number;
+    adjusterOffer?: number;
+    claimantCounterOffer?: number;
+    sentiment?: string;
+    agreementReached?: boolean;
+  } | null>(null);
+  const [negLoading, setNegLoading] = useState(false);
+  const [finalizingSettlement, setFinalizingSettlement] = useState(false);
+
+  // Policy Coverage Rules Engine states
 
   // Policy Coverage Rules Engine states
   const [rulesEvaluation, setRulesEvaluation] = useState<any | null>(null);
@@ -683,6 +701,84 @@ export default function AdjusterDashboard() {
       }
     } catch (err) {
       console.error('Error adding rule:', err);
+    }
+  };
+
+  const handleSendNegotiationOffer = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!selectedClaimId || negOfferInput <= 0 || negLoading) return;
+
+    const offerVal = negOfferInput;
+    const msgVal = negMessageInput.trim() || `Submitting counter-settlement proposal of $${offerVal.toLocaleString()}`;
+
+    setNegMessages(prev => [...prev, { role: 'adjuster', text: msgVal, offer: offerVal }]);
+    setNegMessageInput('');
+    setNegLoading(true);
+
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/negotiation-turn`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ adjusterOffer: offerVal, message: msgVal })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setNegMetrics({
+          claimantName: data.claimantName,
+          originalLossAmount: data.originalLossAmount,
+          policyCapAmount: data.policyCapAmount,
+          adjusterOffer: data.adjusterOffer,
+          claimantCounterOffer: data.claimantCounterOffer,
+          sentiment: data.sentiment,
+          agreementReached: data.agreementReached
+        });
+
+        setNegMessages(prev => [...prev, {
+          role: 'claimant',
+          text: data.claimantResponse,
+          offer: data.claimantCounterOffer
+        }]);
+      } else {
+        alert('Failed to send negotiation offer');
+      }
+    } catch (err) {
+      console.error('Error sending negotiation offer:', err);
+    } finally {
+      setNegLoading(false);
+    }
+  };
+
+  const handleFinalizeSettlement = async () => {
+    if (!selectedClaimId || !negMetrics?.adjusterOffer) return;
+    const finalPayout = negMetrics.adjusterOffer;
+
+    if (!confirm(`Are you sure you want to finalize settlement and lock payout at $${finalPayout.toLocaleString()}?`)) return;
+
+    setFinalizingSettlement(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/finalize-settlement`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ finalAmount: finalPayout })
+      });
+
+      if (res.ok) {
+        alert(`Settlement finalized! Payout of $${finalPayout.toLocaleString()} has been locked and claim status updated to Approved.`);
+        fetchClaims();
+      } else {
+        alert('Failed to finalize settlement');
+      }
+    } catch (err) {
+      console.error('Error finalizing settlement:', err);
+    } finally {
+      setFinalizingSettlement(false);
     }
   };
 
@@ -1327,6 +1423,12 @@ export default function AdjusterDashboard() {
                   >
                     ⚡ Policy Rules Engine
                   </button>
+                  <button
+                    onClick={() => setSplitBTab('negotiate')}
+                    className={`search-tab-btn ${splitBTab === 'negotiate' ? 'active' : ''}`}
+                  >
+                    🤝 Settlement Negotiation
+                  </button>
                 </div>
                 {selectedClaim?.status === 'draft' && (
                   <button
@@ -1939,7 +2041,7 @@ export default function AdjusterDashboard() {
                     )}
                   </div>
                 </div>
-              ) : (
+              ) : splitBTab === 'rules' ? (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                     <div>
@@ -2058,6 +2160,140 @@ export default function AdjusterDashboard() {
                       </div>
                     )}
                   </div>
+                </div>
+              ) : (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                    <div>
+                      <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>🤝 Claimant Settlement Negotiation Simulator</h4>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        Simulate settlement counter-proposals with the claimant AI character and lock approved payout limits.
+                      </p>
+                    </div>
+                    {negMetrics?.adjusterOffer && (
+                      <button
+                        onClick={handleFinalizeSettlement}
+                        disabled={finalizingSettlement}
+                        className="btn btn-primary"
+                        style={{ padding: '0.4rem 1rem', fontSize: '0.775rem', background: '#10b981', color: 'white', fontWeight: 700 }}
+                      >
+                        {finalizingSettlement ? 'Finalizing...' : `Accept & Lock Settlement ($${negMetrics.adjusterOffer.toLocaleString()})`}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Negotiation Metrics Summary Bar */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1.2fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-card)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Original Loss Claimed</div>
+                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        ${negMetrics?.originalLossAmount?.toLocaleString() || '-'}
+                      </div>
+                    </div>
+
+                    <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-card)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Policy Limit Cap</div>
+                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#818cf8' }}>
+                        ${negMetrics?.policyCapAmount?.toLocaleString() || '-'}
+                      </div>
+                    </div>
+
+                    <div style={{ background: 'rgba(0, 180, 216, 0.05)', border: '1px solid rgba(0, 180, 216, 0.25)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Claimant Counter-Offer</div>
+                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                        ${negMetrics?.claimantCounterOffer?.toLocaleString() || '-'}
+                      </div>
+                    </div>
+
+                    <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-card)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Claimant Sentiment</div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 700, marginTop: '0.2rem', color: negMetrics?.agreementReached ? '#10b981' : '#f59e0b' }}>
+                        {negMetrics?.sentiment ? `🟡 ${negMetrics.sentiment}` : 'Awaiting Initial Offer'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Negotiation Dialogue Timeline */}
+                  <div style={{ flex: 1, overflowY: 'auto', background: 'rgba(0,0,0,0.15)', border: '1px solid var(--border-card)', borderRadius: '8px', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                    {negMessages.length === 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)', minHeight: '150px' }}>
+                        <span style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🤝</span>
+                        <p style={{ fontSize: '0.8rem', fontStyle: 'italic', textAlign: 'center', maxWidth: '320px' }}>
+                          Submit your initial settlement counter-offer below to start negotiation dialogue.
+                        </p>
+                      </div>
+                    )}
+
+                    {negMessages.map((msg, idx) => {
+                      const isAdjuster = msg.role === 'adjuster';
+
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            alignSelf: isAdjuster ? 'flex-end' : 'flex-start',
+                            maxWidth: '85%',
+                            background: isAdjuster ? 'rgba(0, 180, 216, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                            border: isAdjuster ? '1px solid rgba(0, 180, 216, 0.3)' : '1px solid var(--border-card)',
+                            borderRadius: '8px',
+                            padding: '0.65rem 0.85rem',
+                            animation: 'fadeInUp 0.2s ease'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem', gap: '1rem' }}>
+                            <span style={{ fontSize: '0.65rem', fontWeight: 700, color: isAdjuster ? 'var(--accent-cyan)' : 'var(--text-secondary)' }}>
+                              {isAdjuster ? '👤 Adjuster Proposal' : `👤 Claimant (${negMetrics?.claimantName || 'Claimant'})`}
+                            </span>
+                            {msg.offer && (
+                              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: isAdjuster ? 'var(--accent-cyan)' : '#f59e0b', background: 'rgba(0,0,0,0.2)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>
+                                Offer: ${msg.offer.toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.775rem', color: 'var(--text-primary)', lineHeight: '1.4' }}>
+                            {msg.text}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {negLoading && (
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', padding: '0.5rem', color: 'var(--accent-cyan)', fontSize: '0.75rem', fontStyle: 'italic' }}>
+                        <div style={{ width: '14px', height: '14px', border: '2px solid var(--accent-cyan)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                        Claimant evaluating counter-proposal...
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Negotiation Offer Action Form */}
+                  <form onSubmit={handleSendNegotiationOffer} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <div style={{ width: '150px' }}>
+                      <input
+                        type="number"
+                        value={negOfferInput || ''}
+                        onChange={(e) => setNegOfferInput(parseFloat(e.target.value) || 0)}
+                        placeholder="Offer Amount ($)"
+                        className="search-input"
+                        style={{ width: '100%', fontSize: '0.8rem' }}
+                        required
+                        disabled={negLoading}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <input
+                        type="text"
+                        value={negMessageInput}
+                        onChange={(e) => setNegMessageInput(e.target.value)}
+                        placeholder="Provide negotiation rationale or compromise terms..."
+                        className="search-input"
+                        style={{ width: '100%', fontSize: '0.8rem' }}
+                        disabled={negLoading}
+                      />
+                    </div>
+                    <button type="submit" disabled={negLoading || negOfferInput <= 0} className="search-btn" style={{ padding: '0 1.25rem' }}>
+                      {negLoading ? 'Sending...' : 'Send Counter-Offer'}
+                    </button>
+                  </form>
                 </div>
               )}
 
