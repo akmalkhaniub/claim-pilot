@@ -8,6 +8,7 @@ import { searchClaimChunks, searchAllChunks, getEmbeddingForQuery } from '../ser
 import { generateAgentSimulation } from '../services/agent_team.js';
 import { evaluateClaimRules, getCoverageRules, addCoverageRule } from '../services/rules.js';
 import { evaluateNegotiationTurn, finalizeClaimSettlement } from '../services/negotiation.js';
+import { generateFraudNetworkGraph } from '../services/fraud_graph.js';
 
 const claimFieldsSchema = z.object({
   claim_type: z.enum(['Auto', 'Property', 'Health', 'General Liability']).optional(),
@@ -1342,6 +1343,29 @@ router.post('/:id/finalize-settlement', requireRole(['adjuster']), async (req: A
   } catch (error: any) {
     console.error('Error finalizing claim settlement:', error);
     res.status(500).json({ error: error.message || 'Failed to finalize claim settlement' });
+  }
+});
+
+// Fetch claim-specific fraud network graph (Adjuster only)
+router.get('/:id/fraud-graph', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const claimId = req.params.id;
+  try {
+    const graphResult = await generateFraudNetworkGraph(claimId);
+    res.status(200).json(graphResult);
+  } catch (error: any) {
+    console.error('Error generating claim fraud graph:', error);
+    res.status(500).json({ error: 'Failed to generate claim fraud network graph' });
+  }
+});
+
+// Fetch system-wide global fraud network graph (Adjuster only)
+router.get('/fraud-graph/global', requireRole(['adjuster']), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const graphResult = await generateFraudNetworkGraph();
+    res.status(200).json(graphResult);
+  } catch (error: any) {
+    console.error('Error generating global fraud graph:', error);
+    res.status(500).json({ error: 'Failed to generate global fraud network graph' });
   }
 });
 
