@@ -61,7 +61,12 @@ export default function AdjusterDashboard() {
   const [loadingClaims, setLoadingClaims] = useState(true);
 
   // Split B Tab state
-  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search' | 'audit' | 'sandbox' | 'agents' | 'rules' | 'negotiate'>('transcript');
+  const [splitBTab, setSplitBTab] = useState<'transcript' | 'search' | 'audit' | 'sandbox' | 'agents' | 'rules' | 'negotiate' | 'graph'>('transcript');
+
+  // Fraud Network Visualizer states
+  const [fraudGraphData, setFraudGraphData] = useState<any | null>(null);
+  const [fraudGraphLoading, setFraudGraphLoading] = useState(false);
+  const [selectedGraphNode, setSelectedGraphNode] = useState<any | null>(null);
 
   // Settlement Negotiation Simulator states
   const [negMessages, setNegMessages] = useState<Array<{ role: 'adjuster' | 'claimant'; text: string; offer?: number }>>([]);
@@ -294,6 +299,8 @@ export default function AdjusterDashboard() {
   useEffect(() => {
     if (splitBTab === 'rules' && selectedClaimId) {
       fetchRulesEvaluation();
+    } else if (splitBTab === 'graph' && selectedClaimId) {
+      fetchFraudGraph();
     }
   }, [splitBTab, selectedClaimId]);
 
@@ -779,6 +786,27 @@ export default function AdjusterDashboard() {
       console.error('Error finalizing settlement:', err);
     } finally {
       setFinalizingSettlement(false);
+    }
+  };
+
+  const fetchFraudGraph = async () => {
+    if (!selectedClaimId) return;
+    setFraudGraphLoading(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/claims/${selectedClaimId}/fraud-graph`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setFraudGraphData(data);
+        if (data.nodes && data.nodes.length > 0) {
+          setSelectedGraphNode(data.nodes[0]);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching fraud graph:', err);
+    } finally {
+      setFraudGraphLoading(false);
     }
   };
 
@@ -1428,6 +1456,12 @@ export default function AdjusterDashboard() {
                     className={`search-tab-btn ${splitBTab === 'negotiate' ? 'active' : ''}`}
                   >
                     🤝 Settlement Negotiation
+                  </button>
+                  <button
+                    onClick={() => setSplitBTab('graph')}
+                    className={`search-tab-btn ${splitBTab === 'graph' ? 'active' : ''}`}
+                  >
+                    🕸️ Fraud Network Graph
                   </button>
                 </div>
                 {selectedClaim?.status === 'draft' && (
@@ -2161,7 +2195,7 @@ export default function AdjusterDashboard() {
                     )}
                   </div>
                 </div>
-              ) : (
+              ) : splitBTab === 'negotiate' ? (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
                     <div>
@@ -2294,6 +2328,171 @@ export default function AdjusterDashboard() {
                       {negLoading ? 'Sending...' : 'Send Counter-Offer'}
                     </button>
                   </form>
+                </div>
+              ) : (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <div>
+                      <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>🕸️ Fraud Network Graph & Syndicate Scanner</h4>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        Interactive node-edge graph mapping shared entities (bodyshops, legal counsel, claimants) across claims.
+                      </p>
+                    </div>
+                    <button
+                      onClick={fetchFraudGraph}
+                      disabled={fraudGraphLoading}
+                      className="search-btn"
+                      style={{ padding: '0.4rem 1rem', fontSize: '0.75rem' }}
+                    >
+                      {fraudGraphLoading ? 'Scanning...' : '🔄 Refresh Network Graph'}
+                    </button>
+                  </div>
+
+                  {/* Syndicate Alert Banner */}
+                  {fraudGraphData && (
+                    <div
+                      style={{
+                        background: fraudGraphData.syndicateRiskRating >= 60 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.08)',
+                        border: `1px solid ${fraudGraphData.syndicateRiskRating >= 60 ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.25)'}`,
+                        borderRadius: '6px',
+                        padding: '0.65rem 0.85rem',
+                        marginBottom: '0.75rem',
+                        display: 'flex',
+                        justify: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 700, color: fraudGraphData.syndicateRiskRating >= 60 ? '#ef4444' : '#10b981', marginBottom: '0.25rem' }}>
+                          Syndicate Risk Rating: {fraudGraphData.syndicateRiskRating}% ({fraudGraphData.syndicateRiskLevel.toUpperCase()} RISK)
+                        </div>
+                        <div style={{ fontSize: '0.725rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                          {fraudGraphData.detectedRings.map((ring: string, rIdx: number) => (
+                            <span key={rIdx}>{ring}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Visual Node Graph & Entity Inspector Grid */}
+                  <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.75rem', minHeight: 0 }}>
+                    {/* SVG Interactive Canvas */}
+                    <div style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-card)', borderRadius: '8px', position: 'relative', overflow: 'hidden', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                      {fraudGraphLoading && (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', color: 'var(--accent-cyan)' }}>
+                          <div style={{ width: '32px', height: '32px', border: '3px solid var(--accent-cyan)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '0.5rem' }} />
+                          <span style={{ fontSize: '0.8rem' }}>Scanning entity relationships...</span>
+                        </div>
+                      )}
+
+                      {!fraudGraphLoading && fraudGraphData && fraudGraphData.nodes && (
+                        <svg viewBox="0 0 800 500" style={{ width: '100%', height: '100%' }}>
+                          {/* Edges */}
+                          {fraudGraphData.edges.map((edge: any) => {
+                            const sourceNode = fraudGraphData.nodes.find((n: any) => n.id === edge.source);
+                            const targetNode = fraudGraphData.nodes.find((n: any) => n.id === edge.target);
+
+                            if (!sourceNode || !targetNode) return null;
+
+                            return (
+                              <g key={edge.id}>
+                                <line
+                                  x1={sourceNode.x}
+                                  y1={sourceNode.y}
+                                  x2={targetNode.x}
+                                  y2={targetNode.y}
+                                  stroke={edge.relation === 'REPAIRED_AT' ? '#f59e0b' : (edge.relation === 'REPRESENTED_BY' ? '#a855f7' : '#00b4d8')}
+                                  strokeWidth={edge.weight * 1.5}
+                                  strokeDasharray={edge.relation === 'REPRESENTED_BY' ? '4 3' : 'none'}
+                                  opacity="0.6"
+                                />
+                              </g>
+                            );
+                          })}
+
+                          {/* Nodes */}
+                          {fraudGraphData.nodes.map((node: any) => {
+                            const isSelected = selectedGraphNode?.id === node.id;
+                            let nodeColor = '#3b82f6'; // claim -> blue
+                            if (node.type === 'claimant') nodeColor = '#10b981'; // green
+                            if (node.type === 'bodyshop') nodeColor = '#f59e0b'; // amber
+                            if (node.type === 'attorney') nodeColor = '#a855f7'; // purple
+
+                            return (
+                              <g
+                                key={node.id}
+                                transform={`translate(${node.x}, ${node.y})`}
+                                onClick={() => setSelectedGraphNode(node)}
+                                style={{ cursor: 'pointer' }}
+                              >
+                                <circle
+                                  r={isSelected ? 22 : 18}
+                                  fill={nodeColor}
+                                  stroke={isSelected ? '#ffffff' : 'rgba(255,255,255,0.3)'}
+                                  strokeWidth={isSelected ? 3 : 1.5}
+                                  style={{ transition: 'all 0.2s ease' }}
+                                />
+                                <text
+                                  y={32}
+                                  textAnchor="middle"
+                                  fill="#ffffff"
+                                  fontSize="10px"
+                                  fontWeight={isSelected ? 'bold' : 'normal'}
+                                >
+                                  {node.label}
+                                </text>
+                              </g>
+                            );
+                          })}
+                        </svg>
+                      )}
+                    </div>
+
+                    {/* Node Details Inspector */}
+                    <div style={{ background: 'rgba(0,0,0,0.15)', border: '1px solid var(--border-card)', borderRadius: '8px', padding: '0.75rem', overflowY: 'auto' }}>
+                      <h5 style={{ fontSize: '0.85rem', marginBottom: '0.5rem', color: 'var(--accent-cyan)' }}>Inspector Details</h5>
+
+                      {selectedGraphNode ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-card)' }}>
+                            <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Selected Node</div>
+                            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                              {selectedGraphNode.label}
+                            </div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', textTransform: 'uppercase', marginTop: '0.15rem' }}>
+                              Type: {selectedGraphNode.type}
+                            </div>
+                          </div>
+
+                          {selectedGraphNode.riskScore !== undefined && (
+                            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-card)' }}>
+                              <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Risk Score</div>
+                              <div style={{ fontSize: '1rem', fontWeight: 700, color: selectedGraphNode.riskScore > 0.4 ? '#ef4444' : '#10b981' }}>
+                                {Math.round(selectedGraphNode.riskScore * 100)}%
+                              </div>
+                            </div>
+                          )}
+
+                          {selectedGraphNode.details && (
+                            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-card)' }}>
+                              <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Attributes</div>
+                              {Object.entries(selectedGraphNode.details).map(([k, v]) => (
+                                <div key={k} style={{ fontSize: '0.725rem', display: 'flex', justifyContent: 'space-between' }}>
+                                  <span style={{ color: 'var(--text-muted)' }}>{k}:</span>
+                                  <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{String(v)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          Click any node in the SVG network graph to inspect relationship attributes.
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
