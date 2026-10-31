@@ -1,0 +1,13 @@
+[
+  {
+    "id": "CP-001",
+    "status": "TODO",
+    "priority": 1,
+    "title": "Add Docker Compose File for Full Local Stack",
+    "description": "Create `docker-compose.yml` defining services for postgres (with pgvector), backend api, parser service, and redis to allow one-command local startup.",
+    "acceptance_criteria": [
+      "docker-compose.yml runs all 4 services with healthy checks",
+      "Configures environment variable bridges between services"
+    ]
+  }
+]

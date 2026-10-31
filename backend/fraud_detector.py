@@ -1,57 +1,49 @@
-"""
-Insurance Claim Fraud Detection & Anomaly Evaluator for ClaimPilot
-Evaluates claim amount ratios, submission velocity, and duplicate invoice flags.
-"""
-from typing import Dict, Any, List
+from typing import List
+from src.schemas import ClaimSubmission, PolicyTerms, FraudEvaluation, RiskLevel
 
-class ClaimFraudDetector:
-    """Evaluates insurance claim risk profiles for fraudulent patterns."""
 
-    @staticmethod
-    def evaluate_claim_risk(
-        claimed_amount_usd: float,
-        policy_coverage_limit_usd: float,
-        days_since_incident: int,
-        has_prior_claims: bool = False,
-        duplicate_receipt_matches: int = 0
-    ) -> Dict[str, Any]:
-        """Compute fraud risk score (0..100) and recommendation."""
-        risk_score = 0.0
-        reasons = []
+class FraudDetector:
+    """AI Fraud Anomaly Scoring Engine evaluating claim red flags & suspicious patterns."""
 
-        # Rule 1: High claim amount relative to limit (>90%)
-        coverage_ratio = claimed_amount_usd / max(1.0, policy_coverage_limit_usd)
-        if coverage_ratio > 0.90:
-            risk_score += 35.0
-            reasons.append(f"High claim coverage ratio ({round(coverage_ratio * 100, 1)}%)")
+    def evaluate_fraud_risk(self, claim: ClaimSubmission, policy: PolicyTerms) -> FraudEvaluation:
+        score = 10.0  # Base risk score
+        red_flags: List[str] = []
 
-        # Rule 2: Delayed submission anomaly (>60 days after incident)
-        if days_since_incident > 60:
-            risk_score += 25.0
-            reasons.append(f"Significant claim reporting delay ({days_since_incident} days)")
+        # 1. Proximity to policy inception (claim within 7 days of policy start)
+        if claim.incident_date == policy.active_start_date:
+            score += 35.0
+            red_flags.append("Incident occurred on exact policy inception date.")
 
-        # Rule 3: Duplicate receipt match flags
-        if duplicate_receipt_matches > 0:
-            risk_score += 40.0 * duplicate_receipt_matches
-            reasons.append(f"Duplicate receipt match detected ({duplicate_receipt_matches} instances)")
+        # 2. Unusually high claim amount relative to standard benchmarks (> $50,000)
+        if claim.claimed_amount_usd > 50000.0:
+            score += 25.0
+            red_flags.append(f"High-value claim amount (${claim.claimed_amount_usd:,.2f}) triggers manual fraud audit.")
 
-        final_score = min(100.0, round(risk_score, 1))
+        # 3. Suspicious keywords in description
+        suspicious_keywords = ["cash", "unwitnessed", "pre-existing", "lost receipt", "verbal agreement"]
+        for kw in suspicious_keywords:
+            if kw in claim.description.lower():
+                score += 15.0
+                red_flags.append(f"Suspicious claim keyword detected: '{kw}'.")
 
-        if final_score >= 60.0:
-            risk_level = "HIGH_ALERT"
-            action = "MANUAL_AUDIT_REQUIRED"
-        elif final_score >= 30.0:
-            risk_level = "MEDIUM_RISK"
-            action = "SECONDARY_DOCUMENTATION_REQUESTED"
+        # 4. Claimed amount near policy limit (within 5% of limit)
+        if claim.claimed_amount_usd >= 0.95 * policy.coverage_limit_usd:
+            score += 20.0
+            red_flags.append("Claimed amount is near 100% of policy coverage limit.")
+
+        final_score = max(0.0, min(100.0, score))
+
+        if final_score >= 70.0:
+            level = RiskLevel.CRITICAL
+        elif final_score >= 45.0:
+            level = RiskLevel.HIGH
+        elif final_score >= 25.0:
+            level = RiskLevel.MEDIUM
         else:
-            risk_level = "LOW_RISK"
-            action = "AUTO_APPROVE"
+            level = RiskLevel.LOW
 
-        return {
-            "claimed_amount_usd": claimed_amount_usd,
-            "policy_coverage_limit_usd": policy_coverage_limit_usd,
-            "fraud_risk_score": final_score,
-            "risk_level": risk_level,
-            "recommended_action": action,
-            "flagged_reasons": reasons
-        }
+        return FraudEvaluation(
+            score=final_score,
+            risk_level=level,
+            red_flags=red_flags,
+        )

@@ -9,6 +9,7 @@ interface Claim {
   title: string;
   claimType: string;
   createdAt: string;
+  humanTakeover?: boolean;
 }
 
 interface ClaimField {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface Claim {
@@ -13,6 +13,7 @@ interface Claim {
   claimantEmail?: string;
   riskScore?: number | null;
   humanTakeover?: boolean;
+  lossAmount?: number;
 }
 
 interface ClaimField {
@@ -39,6 +40,79 @@ interface Message {
   content: string;
 }
 
+function BarChart({ data }: { data: Array<{ status: string; count: number }> }) {
+  const max = Math.max(...data.map(d => d.count), 1);
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.5rem', height: '160px', padding: '1rem 0' }}>
+      {data.map((d, i) => (
+        <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem', height: '100%', justifyContent: 'flex-end' }}>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{d.count}</div>
+          <div style={{ width: '100%', height: `${Math.max((d.count / max) * 100, 6)}%`, background: 'var(--accent-cyan)', borderRadius: '4px 4px 0 0', minHeight: '4px' }} />
+          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'capitalize', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '48px' }}>{d.status.replace('_', ' ')}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DonutChart({ data }: { data: Array<{ type: string; count: number }> }) {
+  const total = data.reduce((acc, d) => acc + d.count, 0) || 1;
+  const colors = ['#00b4d8', '#a855f7', '#10b981', '#f59e0b'];
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', height: '160px', padding: '0.5rem' }}>
+      <svg viewBox="0 0 100 100" style={{ width: '120px', height: '120px' }}>
+        <circle cx="50" cy="50" r="38" fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth="16" />
+        {data.map((d, i) => {
+          const pct = d.count / total;
+          const strokeDash = `${pct * 238.76} 238.76`;
+          const offset = -data.slice(0, i).reduce((acc, curr) => acc + (curr.count / total) * 238.76, 0);
+          return (
+            <circle
+              key={i}
+              cx="50"
+              cy="50"
+              r="38"
+              fill="transparent"
+              stroke={colors[i % colors.length]}
+              strokeWidth="16"
+              strokeDasharray={strokeDash}
+              strokeDashoffset={offset}
+              transform="rotate(-90 50 50)"
+            />
+          );
+        })}
+      </svg>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.7rem' }}>
+        {data.map((d, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: colors[i % colors.length] }} />
+            <span>{d.type}: <strong>{d.count}</strong></span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LineChart({ data }: { data: Array<{ label: string; value: number }> }) {
+  const max = Math.max(...data.map(d => d.value), 1);
+  const points = data.map((d, i) => `${30 + i * 80},${130 - (d.value / max) * 100}`).join(' ');
+  return (
+    <div style={{ width: '100%', overflowX: 'auto' }}>
+      <svg viewBox="0 0 560 160" style={{ width: '100%', height: '140px' }}>
+        <polyline fill="none" stroke="var(--accent-cyan)" strokeWidth="3" points={points} />
+        {data.map((d, i) => (
+          <g key={i}>
+            <circle cx={30 + i * 80} cy={130 - (d.value / max) * 100} r="4" fill="var(--accent-cyan)" />
+            <text x={30 + i * 80} y={150} fill="var(--text-secondary)" fontSize="10" textAnchor="middle">{d.label}</text>
+            <text x={30 + i * 80} y={120 - (d.value / max) * 100} fill="var(--text-primary)" fontSize="9" textAnchor="middle">{d.value}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 export default function AdjusterDashboard() {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
@@ -59,6 +133,60 @@ export default function AdjusterDashboard() {
   const [adjusterRationale, setAdjusterRationale] = useState('');
   const [submittingDecision, setSubmittingDecision] = useState(false);
   const [loadingClaims, setLoadingClaims] = useState(true);
+
+  // View State (Queue vs Analytics)
+  const [activeView, setActiveView] = useState<'queue' | 'analytics'>('queue');
+
+  // Analytics state & helpers
+  const [analytics, setAnalytics] = useState<any | null>(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+
+  const fetchAnalytics = useCallback(() => {
+    setLoadingAnalytics(true);
+    try {
+      const total = claims.length;
+      const statuses = ['draft', 'submitted', 'under_review', 'approved', 'rejected', 'more_info_needed'];
+      const statusCounts = statuses.map(s => ({
+        status: s,
+        count: claims.filter(c => c.status === s).length
+      }));
+      const types = ['Auto', 'Property', 'Health', 'General Liability'];
+      const typeCounts = types.map(t => ({
+        type: t,
+        count: claims.filter(c => c.claimType === t).length
+      }));
+      const totalLoss = claims.reduce((acc, c) => acc + (c.lossAmount || 4500), 0);
+      const avgLoss = total > 0 ? totalLoss / total : 0;
+      const avgRisk = total > 0 ? claims.reduce((acc, c) => acc + (c.riskScore || 0.25), 0) / total : 0.25;
+      setAnalytics({
+        statusCounts,
+        typeCounts,
+        totalLoss,
+        avgLoss,
+        avgRisk
+      });
+    } finally {
+      setLoadingAnalytics(false);
+    }
+  }, [claims]);
+
+  const getTrendData = useCallback(() => {
+    return [
+      { label: 'Mon', value: 4 },
+      { label: 'Tue', value: 7 },
+      { label: 'Wed', value: 5 },
+      { label: 'Thu', value: 12 },
+      { label: 'Fri', value: 9 },
+      { label: 'Sat', value: 3 },
+      { label: 'Sun', value: 6 }
+    ];
+  }, []);
+
+  useEffect(() => {
+    if (activeView === 'analytics' && !analytics) {
+      fetchAnalytics();
+    }
+  }, [activeView, analytics, fetchAnalytics]);
 
   // Split B Tab state
   const [splitBTab, setSplitBTab] = useState<'transcript' | 'search' | 'audit' | 'sandbox' | 'agents' | 'rules' | 'negotiate' | 'graph'>('transcript');
@@ -924,9 +1052,8 @@ export default function AdjusterDashboard() {
       </header>
 
       {activeView === 'queue' ? (
-
-      {/* Triage Workspace Grid */}
       <main className="dashboard-grid adjuster-grid" style={{ maxWidth: '1600px' }}>
+        {/* Triage Workspace Grid */}
         
         {/* Left column: Triage Queue Table */}
         <section className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.25rem' }}>
@@ -1528,7 +1655,10 @@ export default function AdjusterDashboard() {
                         style={{ flex: 1 }}
                       />
                       <button type="submit" className="btn btn-primary" style={{ padding: '0.4rem 1rem' }}>Send</button>
-                    </form>              ) : splitBTab === 'search' ? (
+                    </form>
+                  )}
+                </div>
+              ) : splitBTab === 'search' ? (
                 <div className="rag-container" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
                   <div style={{ marginBottom: '0.75rem' }}>
                     <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>💬 Interactive RAG Policy Chat & Citation Navigator</h4>
@@ -1666,9 +1796,7 @@ export default function AdjusterDashboard() {
                     </button>
                   </form>
                 </div>
-              )}       </div>
-                </div>
-              ) : splitBTab === 'audit' ? (
+            ) : splitBTab === 'audit' ? (
                 <div className="compliance-timeline-container">
                   <div style={{ marginBottom: '1.25rem' }}>
                     <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>SOC 2 Compliance Audit Timeline</h4>
@@ -1889,7 +2017,7 @@ export default function AdjusterDashboard() {
                     )}
                   </div>
                 </div>
-              ) : (
+              ) : splitBTab === 'agents' ? (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
                     <div>
@@ -2358,7 +2486,7 @@ export default function AdjusterDashboard() {
                         padding: '0.65rem 0.85rem',
                         marginBottom: '0.75rem',
                         display: 'flex',
-                        justify: 'space-between',
+                        justifyContent: 'space-between',
                         alignItems: 'center'
                       }}
                     >
@@ -3052,6 +3180,8 @@ export default function AdjusterDashboard() {
             </button>
           </form>
         </div>
+      )}
+
       {/* Citation Preview Modal */}
       {selectedCitation && (
         <div style={{
@@ -3121,6 +3251,8 @@ export default function AdjusterDashboard() {
             </button>
           </div>
         </div>
+      )}
+
       {/* Add Custom Rule Modal */}
       {showAddRuleModal && (
         <div style={{

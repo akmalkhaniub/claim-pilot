@@ -23,3 +23,7 @@ backend/uploads/
 *.log
 .DS_Store
 Thumbs.db
+.pytest_cache/
+*.db
+*.sqlite
+*.sqlite3
